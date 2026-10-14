@@ -52,6 +52,8 @@ The simplest private way is [Tailscale](https://tailscale.com/download) (free fo
 2. Start JobLedger with `python -m jobledger --tailscale`. It runs `tailscale serve` for you and prints an address like `https://laptop.tail1234.ts.net`.
 3. Open that address in Chrome on your phone, then tap the menu and **Install app**.
 
+On Windows, double-click `start-jobledger.cmd` instead of step 2 (it builds the app the first time). To start JobLedger when you sign in, press Win+R, type `shell:startup`, and put a shortcut to that file in the folder that opens.
+
 Only devices signed in to your Tailscale account can open the address. JobLedger allows that name automatically and stops the HTTPS address when it exits. Setting `JL_TOKEN` as well is still a good idea. Any other HTTPS tunnel works too: list its host name in `JL_HOSTS`, or set `JL_TOKEN`.
 
 ## Wording suggestions (optional, your own key)
