@@ -12,6 +12,13 @@ except ImportError:  # pragma: no cover
 from tests.test_api import Server
 
 
+def utc_stamp(pg, y, mo, d, h, mi):
+    """What wall-clock time y-mo-d h:mi in the browser's zone is in UTC, as Google Calendar link dates."""
+    import datetime as dt, zoneinfo
+    tz = pg.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
+    return dt.datetime(y, mo, d, h, mi, tzinfo=zoneinfo.ZoneInfo(tz)).astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
 @unittest.skipUnless(sync_playwright and DIST.exists(), "needs playwright and `npm run build`")
 class UI(unittest.TestCase):
     @classmethod
@@ -210,7 +217,7 @@ class UI(unittest.TestCase):
         self.assertIn("BEGIN:VEVENT", Path(dl.value.path()).read_text())
         pg.fill("[data-fu]", "2031-03-04"); pg.dispatch_event("[data-fu]", "change")
         pg.wait_for_selector(".remind >> text=this date")
-        self.assertIn("20310304T090000", pg.get_attribute("[data-gcal]", "href"))
+        self.assertIn("dates=" + utc_stamp(pg, 2031, 3, 4, 9, 0), pg.get_attribute("[data-gcal]", "href"))  # exact UTC time
         pg.click("[data-view=data]")
         with pg.expect_download() as dl:
             pg.click("[data-ics-all]")
@@ -254,7 +261,9 @@ class UI(unittest.TestCase):
         panel = pg.inner_text("section:has(h3:text('Interviews'))")
         self.assertIn("45 min", panel)
         self.assertIn("2:30", panel)
-        self.assertIn("dates=20310506T143000", pg.get_attribute("section:has(h3:text('Interviews')) a.btn", "href"))
+        href = pg.get_attribute("section:has(h3:text('Interviews')) a.btn", "href")
+        self.assertIn("dates=" + utc_stamp(pg, 2031, 5, 6, 14, 30) + "%2F" + utc_stamp(pg, 2031, 5, 6, 15, 15), href)
+        self.assertIn("ctz=", href)
         self.assertIn("scheduled for", pg.inner_text(".tl"))
         pg.click("[data-go=board]")
         self.assertIn("2:30", pg.inner_text(".card:has-text('Initech') .pill"))  # card shows the next interview

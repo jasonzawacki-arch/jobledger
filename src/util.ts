@@ -22,10 +22,22 @@ export const whenLocal = (iso: string, withWeekday = true): string => {
 };
 /** The viewer's own time zone, e.g. "America/New_York"; empty if the browser does not say. */
 export const userTimeZone = (): string => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
-/** Google Calendar link with the times pinned to the viewer's time zone, so the event lands at the right
- *  local time even when the Google account itself is set to another zone (or UTC). */
+/** "20261017T090000" read as wall-clock time where the viewer is -> "20261017T130000Z" (UTC). */
+export const toUtcStamp = (local: string): string => {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(local);
+  if (!m) return local; // already UTC (ends in Z) or not a time we understand: leave it alone
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+};
+/** Google Calendar link with exact times: the start and end are converted to UTC (with a Z) using the viewer's
+ *  own time zone, and that zone is added as ctz so Google shows the event in local time. Nothing is left for
+ *  Google to guess, whatever zone the Google account itself is set to. */
 export const calLink = (url: string | null | undefined): string => {
   if (!url || !/^https:\/\/calendar\.google\.com\//.test(url)) return '';
+  const u = new URL(url);
+  const dates = u.searchParams.get('dates');
+  if (dates) u.searchParams.set('dates', dates.split('/').map(toUtcStamp).join('/'));
   const tz = userTimeZone();
-  return tz && !/[?&]ctz=/.test(url) ? `${url}&ctz=${encodeURIComponent(tz)}` : url;
+  if (tz && !u.searchParams.has('ctz')) u.searchParams.set('ctz', tz);
+  return u.toString();
 };
