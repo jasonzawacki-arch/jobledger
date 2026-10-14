@@ -39,6 +39,8 @@ Open http://127.0.0.1:8000. Settings come from environment variables:
 | `JL_DB` | `jobledger.sqlite3` | database file |
 | `JL_HOST` / `JL_PORT` | `127.0.0.1` / `8000` | where to listen |
 | `JL_TOKEN` | unset | if set, every API call needs it (the UI asks once) |
+| `JL_HOSTS` | unset | extra host names to answer on without a token, comma-separated (e.g. `laptop.local`) |
+| `JL_TZ` | this computer's zone | time zone for follow-up dates, e.g. `America/New_York` |
 
 ## Wording suggestions (optional, your own key)
 
@@ -69,12 +71,15 @@ Rule tests use an injected clock, so "10 days idle" is tested without waiting. B
 - CSV cells that start with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets do not run them as formulas.
 - The UI escapes all text before rendering and only links http(s) addresses.
 - The UI is TypeScript compiled by a small dependency-free `build.mjs` into one HTML file.
+- Other websites open in your browser cannot use the API. Writes from another origin are refused, request bodies must be `application/json` (which a plain form cannot send), and without a token the server only answers to `localhost`, `127.0.0.1` or names in `JL_HOSTS`, which blocks DNS rebinding.
+- The token is accepted only in the `Authorization` header, never in the URL, so it does not end up in logs or history.
+- The database is closed cleanly when the server stops.
 
 ## Honest limits
 
 - **Phone use needs HTTPS.** Android only offers Install app on a secure address. On your home network that means putting the server behind something like a Tailscale or Cloudflare tunnel. Set `JL_TOKEN` before you expose it.
-- **Single user.** One token at most, no accounts. If you expose it beyond your own machine, put it behind HTTPS and set `JL_TOKEN`. The token is sent as a bearer header and stored in the browser's local storage.
-- **Time is UTC.** "Days" and follow-up dates use UTC, so a date can flip a few hours early or late near midnight.
+- **Single user.** One token at most, no accounts. If you expose it beyond your own machine, put it behind HTTPS and set `JL_TOKEN` (without one, it refuses any host name other than localhost and `JL_HOSTS`). The token is sent as a bearer header and stored in the browser's local storage.
+- **Time zone.** Follow-up dates follow the server computer's time zone (or `JL_TZ`). The CSV export's `created_utc` column stays in UTC.
 - **No automatic updates from email or job sites.** You enter and move jobs yourself.
 - **Matching is word-based, not understanding.** It can miss a requirement your resume covers in different words, and a "Match" only means shared wording. It never rewrites your resume or adds claims: evidence is always a line copied from it. Suggested rewording, if added later, would be optional and use your own Claude API key.
 - Backups include your resume and restore everything at once; there is no merge.

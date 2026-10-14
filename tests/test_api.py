@@ -13,9 +13,10 @@ class Server:
 
     def stop(self): self.srv.should_exit = True; self.th.join(5)
 
-    def call(self, method, path, body=None, token=None):
-        req = urllib.request.Request(self.base + path, method=method, data=None if body is None else json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})})
+    def call(self, method, path, body=None, token=None, headers=None, raw=None):
+        data = raw if raw is not None else (None if body is None else json.dumps(body).encode())
+        req = urllib.request.Request(self.base + path, method=method, data=data,
+                                     headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {}), **(headers or {})})
         try:
             with urllib.request.urlopen(req) as r: raw = r.read(); return r.status, raw
         except urllib.error.HTTPError as e: return e.code, e.read()
@@ -97,9 +98,71 @@ class Auth(unittest.TestCase):
             self.assertEqual(s.call("GET", "/api/jobs")[0], 401)
             self.assertEqual(s.call("GET", "/api/jobs", token="wrong")[0], 401)
             self.assertEqual(s.call("GET", "/api/jobs", token="s3cret")[0], 200)
-            self.assertEqual(s.call("GET", "/api/jobs?token=s3cret")[0], 200)
+            self.assertEqual(s.call("GET", "/api/jobs?token=s3cret")[0], 401)  # never in the URL
+            # With a token, any host name is fine (e.g. behind an HTTPS tunnel), but other sites still cannot write.
+            self.assertEqual(s.call("GET", "/api/jobs", token="s3cret", headers={"Host": "me.example.net"})[0], 200)
+            self.assertEqual(s.call("POST", "/api/jobs", {"company": "A", "title": "x"}, token="s3cret",
+                                    headers={"Host": "me.example.net", "Origin": "https://me.example.net"})[0], 201)
+            self.assertEqual(s.call("POST", "/api/jobs", {"company": "A", "title": "x"}, token="s3cret",
+                                    headers={"Host": "me.example.net", "Origin": "https://evil.example"})[0], 403)
         finally:
             s.stop()
+
+
+class CrossSite(unittest.TestCase):
+    """Another website open in the same browser must not be able to change or read your data."""
+
+    @classmethod
+    def setUpClass(cls): cls.s = Server()
+    @classmethod
+    def tearDownClass(cls): cls.s.stop()
+
+    def jobs(self):
+        return len(json.loads(self.s.call("GET", "/api/jobs?closed=1")[1]))
+
+    def test_other_origin_cannot_write(self):
+        before = self.jobs()
+        for path, body in (("/api/jobs", {"company": "Evil", "title": "x"}), ("/api/restore", {"app": "jobledger"})):
+            st, _ = self.s.call("POST", path, body, headers={"Origin": "https://evil.example"})
+            self.assertEqual(st, 403, path)
+        self.assertEqual(self.s.call("POST", "/api/jobs", {"company": "Evil", "title": "x"}, headers={"Origin": "null"})[0], 403)
+        self.assertEqual(self.s.call("POST", "/api/jobs", {"company": "Evil", "title": "x"}, headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
+        self.assertEqual(self.s.call("DELETE", "/api/jobs/1", headers={"Origin": "http://localhost:1"})[0], 403)  # another port is another site
+        self.assertEqual(self.jobs(), before)
+
+    def test_simple_form_body_is_rejected(self):
+        # A plain form or no-cors fetch can only send text/plain, form or multipart bodies.
+        for ctype in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"):
+            st, _ = self.s.call("POST", "/api/jobs", raw=b'{"company":"Evil","title":"x"}', headers={"Content-Type": ctype})
+            self.assertEqual(st, 400, ctype)
+
+    def test_same_origin_works(self):
+        origin = self.s.base  # what the app's own page sends
+        self.assertEqual(self.s.call("POST", "/api/jobs", {"company": "Mine", "title": "x"}, headers={"Origin": origin})[0], 201)
+        self.assertEqual(self.s.call("POST", "/api/jobs", {"company": "Mine", "title": "x"},
+                                     headers={"Origin": origin.replace("127.0.0.1", "localhost"), "Host": origin.split("//")[1].replace("127.0.0.1", "localhost")})[0], 201)
+
+    def test_rebound_host_name_is_refused(self):
+        # DNS rebinding: evil.example made to resolve to 127.0.0.1 is same-origin to the browser, so check the Host.
+        self.assertEqual(self.s.call("GET", "/api/jobs", headers={"Host": "evil.example"})[0], 403)
+        self.assertEqual(self.s.call("GET", "/api/backup", headers={"Host": "evil.example:8000"})[0], 403)
+
+    def test_listed_host_is_allowed(self):
+        s = Server(hosts=["laptop.local"])
+        try:
+            self.assertEqual(s.call("GET", "/api/jobs", headers={"Host": "laptop.local:8000"})[0], 200)
+            self.assertEqual(s.call("GET", "/api/jobs", headers={"Host": "evil.example"})[0], 403)
+        finally:
+            s.stop()
+
+
+class Shutdown(unittest.TestCase):
+    def test_database_closed_on_stop(self):
+        import sqlite3
+        s = Server()
+        s.stop()
+        with self.assertRaises(sqlite3.ProgrammingError):
+            s.app.state.db.conn.execute("SELECT 1")
 
 
 if __name__ == "__main__":

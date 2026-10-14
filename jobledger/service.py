@@ -62,12 +62,14 @@ def _date(value: str, field: str) -> dt.date:
 
 
 class Tracker:
-    def __init__(self, db: Database, clock: Callable[[], float] = time.time, stale_days: int = STALE_DAYS):
-        self.db, self.clock, self.stale_days = db, clock, stale_days
+    def __init__(self, db: Database, clock: Callable[[], float] = time.time, stale_days: int = STALE_DAYS,
+                 tz: Optional[dt.tzinfo] = None):
+        """tz decides what "today" is for follow-up dates. None means this computer's own time zone."""
+        self.db, self.clock, self.stale_days, self.tz = db, clock, stale_days, tz
 
     # ---- helpers
     def _today(self) -> dt.date:
-        return dt.datetime.fromtimestamp(self.clock(), dt.timezone.utc).date()
+        return dt.datetime.fromtimestamp(self.clock(), self.tz).date()
 
     def _event(self, job_id: int, kind: str, text: str) -> None:
         self.db.conn.execute("INSERT INTO events (job_id, at, kind, text) VALUES (?, ?, ?, ?)", (job_id, self.clock(), kind, text))

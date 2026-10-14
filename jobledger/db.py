@@ -71,10 +71,14 @@ class Database:
         self.conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.RLock()
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        if path != ":memory:":
-            self.conn.execute("PRAGMA journal_mode = WAL")
-        self.migrate()
+        try:
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            if path != ":memory:":
+                self.conn.execute("PRAGMA journal_mode = WAL")
+            self.migrate()
+        except BaseException:
+            self.conn.close()  # e.g. a database from a newer version: do not leave the file open
+            raise
 
     def migrate(self) -> None:
         with self.lock:
@@ -87,3 +91,9 @@ class Database:
     def close(self) -> None:
         with self.lock:
             self.conn.close()
+
+    def __enter__(self) -> "Database":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()

@@ -1,9 +1,10 @@
-"""Run with: python -m jobledger   (env: JL_DB, JL_TOKEN, JL_HOST, JL_PORT; flag: --demo)"""
+"""Run with: python -m jobledger   (env: JL_DB, JL_TOKEN, JL_HOST, JL_PORT, JL_HOSTS, JL_TZ; flag: --demo)"""
 from __future__ import annotations
 
+import datetime as dt
 import os
 import sys
-import time
+import zoneinfo
 
 import uvicorn
 
@@ -29,15 +30,26 @@ def load_demo(tracker) -> None:
             tracker.close(j["id"], closed)
         if follow is not None:
             tracker.clock = real
-            d = time.strftime("%Y-%m-%d", time.gmtime(now + follow * DAY))
+            d = dt.datetime.fromtimestamp(now + follow * DAY, tracker.tz).date().isoformat()
             tracker.update_job(j["id"], {"follow_up_on": d})
     tracker.clock = real
     if not tracker.get_resume()["text"]:
         tracker.set_resume(DEMO_RESUME)
 
 
+def time_zone():
+    name = os.environ.get("JL_TZ", "").strip()
+    if not name:
+        return None  # this computer's own time zone
+    try:
+        return zoneinfo.ZoneInfo(name)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        sys.exit(f"JL_TZ={name!r} is not a time zone name like America/New_York")
+
+
 def main() -> None:
-    app = make_app(os.environ.get("JL_DB", "jobledger.sqlite3"), os.environ.get("JL_TOKEN") or None)
+    app = make_app(os.environ.get("JL_DB", "jobledger.sqlite3"), os.environ.get("JL_TOKEN") or None,
+                   hosts=os.environ.get("JL_HOSTS", "").split(","), tz=time_zone())
     if "--demo" in sys.argv:
         load_demo(app.state.tracker)
     host, port = os.environ.get("JL_HOST", "127.0.0.1"), int(os.environ.get("JL_PORT", "8000"))

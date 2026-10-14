@@ -1,12 +1,14 @@
 """HTTP layer: thin JSON endpoints over Tracker, plus the built single-file UI."""
 from __future__ import annotations
 
+import contextlib
 import hmac
 import json
 import os
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
+from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -18,13 +20,26 @@ from .db import Database
 from .service import NotFound, Tracker, ValidationError
 
 MAX_BODY = 5_000_000
+LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _hostname(value: str) -> str:
+    """'Example.com:8000' -> 'example.com', '[::1]:8000' -> '::1'. Empty on anything unparseable."""
+    try:
+        return (urlsplit("//" + value).hostname or "").lower()
+    except ValueError:
+        return ""
 
 
 def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir: Optional[str] = None,
-             clock: Callable[[], float] = time.time, rewriter: Optional[rw.Rewriter] = None) -> Starlette:
+             clock: Callable[[], float] = time.time, rewriter: Optional[rw.Rewriter] = None,
+             hosts: Iterable[str] = (), tz=None) -> Starlette:
     db = Database(db_path)
-    db.migrate()
-    tracker = Tracker(db, clock)
+    tracker = Tracker(db, clock, tz=tz)
+    # Without a token, only answer to names that point at this machine, unless more are listed (JL_HOSTS).
+    # This stops DNS rebinding: a hostile site whose domain is made to resolve to 127.0.0.1.
+    allowed_hosts = LOOPBACK | {h.strip().lower() for h in hosts if h.strip()}
     index = Path(static_dir or Path(__file__).resolve().parent.parent / "dist") / "index.html"
 
     def err(msg: str, status: int) -> JSONResponse:
@@ -34,13 +49,32 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
         if not token:
             return True
         given = req.headers.get("authorization", "")
-        given = given[7:] if given.lower().startswith("bearer ") else req.query_params.get("token", "")
+        # Header only: a token in the URL ends up in logs and browser history.
+        given = given[7:] if given.lower().startswith("bearer ") else ""
         return hmac.compare_digest(given.encode(), token.encode())
+
+    def foreign(req: Request) -> Optional[str]:
+        """Why a request must be refused as coming from another site, or None if it is fine."""
+        host = _hostname(req.headers.get("host", ""))
+        if not token and host not in allowed_hosts:
+            return "This server only answers on localhost. Set JL_TOKEN, or list the name in JL_HOSTS."
+        if req.method in SAFE_METHODS:
+            return None
+        # Browsers always send Origin on cross-site writes; it must name this same host.
+        origin = req.headers.get("origin")
+        if origin is not None and urlsplit(origin).netloc.lower() != req.headers.get("host", "").lower():
+            return "Requests from other sites are not allowed"
+        if req.headers.get("sec-fetch-site") == "cross-site":
+            return "Requests from other sites are not allowed"
+        return None
 
     async def body(req: Request):
         raw = await req.body()
         if len(raw) > MAX_BODY:
             raise ValidationError("Request is too large")
+        # A plain HTML form or a no-cors fetch cannot send this type, so this also blocks cross-site writes.
+        if raw and req.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+            raise ValidationError("Request body must be sent as application/json")
         try:
             data = json.loads(raw or b"{}")
         except ValueError:
@@ -49,6 +83,9 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
 
     def api(fn):
         async def handler(req: Request):
+            why = foreign(req)
+            if why:
+                return err(why, 403)
             if not authed(req):
                 return err("A valid token is required", 401)
             try:
@@ -217,7 +254,14 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
         Route("/api/backup", api(backup)),
         Route("/api/restore", api(restore), methods=["POST"]),
     ]
-    app = Starlette(routes=routes)
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        try:
+            yield
+        finally:
+            db.close()
+
+    app = Starlette(routes=routes, lifespan=lifespan)
     app.state.tracker = tracker
     app.state.db = db
     return app

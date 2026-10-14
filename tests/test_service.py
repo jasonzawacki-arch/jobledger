@@ -1,4 +1,4 @@
-import csv, io, json, unittest
+import csv, datetime as dt, io, json, unittest, zoneinfo
 from jobledger.db import Database
 from jobledger.service import DAY, NotFound, Tracker, ValidationError
 
@@ -11,9 +11,17 @@ class Clock:
     def advance(self, days): self.t += days * DAY
 
 
-def make():
+OPEN = []
+
+
+def make(tz=dt.timezone.utc):
     c = Clock()
-    return Tracker(Database(), c), c
+    OPEN.append(Database())
+    return Tracker(OPEN[-1], c, tz=tz), c
+
+
+def tearDownModule():
+    while OPEN: OPEN.pop().close()
 
 
 class Rules(unittest.TestCase):
@@ -112,8 +120,28 @@ class Rules(unittest.TestCase):
         self.assertEqual(t.list_jobs()[0]["company"], "keep")
 
     def test_migrate_refuses_newer_schema(self):
-        d = Database(); d.conn.execute("PRAGMA user_version = 99")
-        with self.assertRaises(Exception): d.migrate()
+        with Database() as d:
+            d.conn.execute("PRAGMA user_version = 99")
+            with self.assertRaises(Exception): d.migrate()
+
+    def test_newer_database_file_is_refused_and_released(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "x.sqlite3")
+            with Database(path) as d: d.conn.execute("PRAGMA user_version = 99")
+            with self.assertRaises(RuntimeError): Database(path)
+
+    def test_follow_up_date_uses_local_day(self):
+        # T0 is 08:00 UTC, which is 03:00 the same day in New York. At 02:00 UTC the next day it is
+        # still the evening before in New York, so a follow-up for that next day is not due yet there.
+        ny = zoneinfo.ZoneInfo("America/New_York")
+        for tz, expect in ((dt.timezone.utc, True), (ny, False)):
+            t, c = make(tz)
+            j = t.add_job({"company": "A", "title": "x", "stage": 1})
+            c.advance(18 / 24)  # 02:00 UTC next day
+            tomorrow_utc = dt.datetime.fromtimestamp(c(), dt.timezone.utc).date().isoformat()
+            t.update_job(j["id"], {"follow_up_on": tomorrow_utc})
+            self.assertEqual(t.get_job(j["id"])["follow_up_due"], expect, tz)
 
 
 if __name__ == "__main__":
