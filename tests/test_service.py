@@ -198,8 +198,8 @@ class Reminders(unittest.TestCase):
         text = t.calendar()
         self.assertTrue(text.startswith("BEGIN:VCALENDAR\r\n") and text.endswith("END:VCALENDAR\r\n"))
         self.assertEqual(text.count("BEGIN:VEVENT"), 1)
-        self.assertIn("DTSTART:20270125T090000\r\n", text)
-        self.assertIn("DTEND:20270125T091500\r\n", text)
+        self.assertIn("DTSTART:20270125T090000Z\r\n", text)  # this tracker's zone is UTC, so 9:00 is 09:00Z
+        self.assertIn("DTEND:20270125T091500Z\r\n", text)
         self.assertIn("UID:jobledger-job-1@jobledger.local", text)
         self.assertIn("TRIGGER:-PT0M", text)
         for line in text.split("\r\n"):
@@ -210,6 +210,16 @@ class Reminders(unittest.TestCase):
         self.assertEqual(t.calendar(a["id"]).count("BEGIN:VEVENT"), 1)
         with self.assertRaises(ValidationError): t.calendar(2)  # saved job with no date
         with self.assertRaises(NotFound): t.calendar(99)
+
+    def test_calendar_uses_the_viewers_zone(self):
+        t, _ = make()
+        t.add_job({"company": "A", "title": "x", "stage": 1})
+        ny = t.calendar(None, "America/New_York")
+        self.assertIn("DTSTART:20270125T140000Z", ny)  # 9:00 AM in New York in January is 14:00 UTC
+        floating, _ = make(tz=None)
+        floating.add_job({"company": "A", "title": "x", "stage": 1})
+        self.assertRegex(floating.calendar(), r"DTSTART:\d{8}T090000\r\n")  # no zone known: "floating" local time
+        with self.assertRaises(ValidationError): t.calendar(None, "Not/AZone")
 
     def test_google_link(self):
         from urllib.parse import parse_qs, urlsplit

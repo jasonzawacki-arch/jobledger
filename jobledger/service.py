@@ -6,6 +6,7 @@ import datetime as dt
 import io
 import re
 import time
+import zoneinfo
 from typing import Callable, Optional
 
 from . import reminders
@@ -162,8 +163,16 @@ class Tracker:
                 "SELECT id, starts_at, minutes, label, place FROM interviews WHERE job_id = ? ORDER BY starts_at, id", (job_id,))]
             return out
 
-    def calendar(self, job_id: Optional[int] = None) -> str:
-        """An .ics file with the follow-up reminder for one job, or for every open job that has one."""
+    def calendar(self, job_id: Optional[int] = None, tz_name: Optional[str] = None) -> str:
+        """An .ics file with the follow-up reminder for one job, or for every open job that has one.
+        tz_name is the viewer's zone (e.g. "America/New_York"); with it, times are written in UTC so every
+        calendar app places them correctly. Without it they fall back to this server's zone, if set."""
+        zone = self.tz
+        if tz_name:
+            try:
+                zone = zoneinfo.ZoneInfo(tz_name)
+            except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+                raise ValidationError("Unknown time zone") from None
         with self.db.lock:
             if job_id is not None:
                 job = self.get_job(job_id)
@@ -174,7 +183,7 @@ class Tracker:
             else:
                 jobs = [self.get_job(j["id"]) for j in self.list_jobs() if j["reminder_on"]]
                 interviews = self.upcoming_interviews(days=3650)
-        return reminders.ics(jobs, self.clock(), interviews)
+        return reminders.ics(jobs, self.clock(), interviews, zone)
 
     # ---- interviews
     def _next_interview(self, job_id: int) -> Optional[str]:

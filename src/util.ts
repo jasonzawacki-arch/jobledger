@@ -20,3 +20,12 @@ export const whenLocal = (iso: string, withWeekday = true): string => {
   const [hh, mm] = (t || '00:00').split(':').map(Number);
   return new Date(y, m - 1, day, hh, mm).toLocaleString(undefined, { ...(withWeekday ? { weekday: 'short' } : {}), month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
+/** The viewer's own time zone, e.g. "America/New_York"; empty if the browser does not say. */
+export const userTimeZone = (): string => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
+/** Google Calendar link with the times pinned to the viewer's time zone, so the event lands at the right
+ *  local time even when the Google account itself is set to another zone (or UTC). */
+export const calLink = (url: string | null | undefined): string => {
+  if (!url || !/^https:\/\/calendar\.google\.com\//.test(url)) return '';
+  const tz = userTimeZone();
+  return tz && !/[?&]ctz=/.test(url) ? `${url}&ctz=${encodeURIComponent(tz)}` : url;
+};

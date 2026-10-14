@@ -202,6 +202,7 @@ class UI(unittest.TestCase):
         self.assertIn("the nudge day", pg.inner_text(".remind"))
         href = pg.get_attribute("[data-gcal]", "href")
         self.assertTrue(href.startswith("https://calendar.google.com/calendar/render?action=TEMPLATE"))
+        self.assertIn("&ctz=", href)  # pinned to the viewer's time zone
         self.assertEqual(pg.get_attribute("[data-gcal]", "target"), "_blank")
         with pg.expect_download() as dl:
             pg.click("[data-ics]")
@@ -212,7 +213,10 @@ class UI(unittest.TestCase):
         pg.click("[data-view=data]")
         with pg.expect_download() as dl:
             pg.click("[data-ics-all]")
-        self.assertIn("DTSTART:20310304T090000", Path(dl.value.path()).read_text())
+        import datetime as dt, zoneinfo
+        tz = pg.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
+        want = dt.datetime(2031, 3, 4, 9, 0, tzinfo=zoneinfo.ZoneInfo(tz)).astimezone(dt.timezone.utc)
+        self.assertIn(f"DTSTART:{want:%Y%m%dT%H%M%SZ}", Path(dl.value.path()).read_text())  # 9:00 AM where the viewer is
         self.assertEqual(self.errors, [])
 
     def test_fill_from_link_keeps_typed_fields(self):

@@ -168,10 +168,10 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     async def job_calendar(req):
-        return ics(tracker.calendar(jid(req)), f"jobledger-follow-up-{jid(req)}.ics")
+        return ics(tracker.calendar(jid(req), req.query_params.get("tz")), f"jobledger-follow-up-{jid(req)}.ics")
 
     async def all_calendar(req):
-        return ics(tracker.calendar(), "jobledger-follow-ups.ics")
+        return ics(tracker.calendar(None, req.query_params.get("tz")), "jobledger-follow-ups.ics")
 
     async def pulse(req):
         return JSONResponse(tracker.pulse())

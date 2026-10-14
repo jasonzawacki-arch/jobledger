@@ -1,6 +1,6 @@
 import { api, ApiError, getAiKey, getToken, setAiKey, setToken } from './api';
 import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, SOURCES, STAGES } from './types';
-import { esc, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
+import { calLink, esc, userTimeZone, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
 
 type View = 'board' | 'job' | 'pulse' | 'data';
 interface State {
@@ -124,7 +124,7 @@ function contactsPanel(j: Job): string {
 function interviewsPanel(j: Job): string {
   const list = (j.interviews ?? []).map((iv) => {
     const place = iv.place ? (safeUrl(iv.place) ? `<a class="job-link" href="${esc(iv.place)}" target="_blank" rel="noopener noreferrer">Join link</a>` : esc(iv.place)) : '';
-    const cal = !iv.past && safeUrl(iv.calendar_link) ? `<a class="btn" href="${esc(iv.calendar_link)}" target="_blank" rel="noopener noreferrer">Add to Google Calendar</a>` : '';
+    const cal = !iv.past && calLink(iv.calendar_link) ? `<a class="btn" href="${esc(calLink(iv.calendar_link))}" target="_blank" rel="noopener noreferrer">Add to Google Calendar</a>` : '';
     return `<div class="fu${iv.past ? ' past' : ''}"><span><b>${esc(iv.label || 'Interview')}</b><br><small class="mute">${esc(whenLocal(iv.starts_at))} · ${iv.minutes} min${place ? ' · ' + place : ''}${iv.past ? ' · done' : ''}</small></span>
       <span class="btns">${cal}<button class="btn danger" data-del-interview="${iv.id}" aria-label="Remove ${esc(iv.label || 'interview')}">Remove</button></span></div>`;
   }).join('');
@@ -167,7 +167,7 @@ function draftPanel(j: Job): string {
 function reminderPanel(j: Job): string {
   if (!j.reminder_on) return '';
   const when = `${isoDay(j.reminder_on)}, 9:00 AM`;
-  const link = j.calendar_link && safeUrl(j.calendar_link);
+  const link = calLink(j.calendar_link);
   return `<div class="remind"><span class="mute" style="font-size:13px">Get reminded even when JobLedger is closed: put ${j.reminder_is_nudge ? 'the nudge day' : 'this date'} (<b>${esc(when)}</b>) in your calendar. If the date changes, add it again.</span>
     <div class="btns">${link ? `<a class="btn" href="${esc(link)}" target="_blank" rel="noopener noreferrer" data-gcal>Add to Google Calendar</a>` : ''}<button class="btn" data-ics>Download .ics</button></div></div>`;
 }
@@ -255,7 +255,7 @@ function pulseView(): string {
   const max = Math.max(...p.reached, 1);
   const closedTotal = p.closed.rejected + p.closed.withdrawn + p.closed.ghosted;
   const due = p.follow_ups_due.map((d) => `<div class="fu"><span><b>${esc(d.company)}</b><br><small class="mute">${esc(d.title)} · ${esc(d.stage_name)} · ${d.follow_up_on ? 'follow-up ' + esc(isoDay(d.follow_up_on)) : plural(d.idle_days, 'day') + ' quiet'}</small></span><button class="btn" data-open="${d.id}">Open</button></div>`).join('');
-  const soon = p.upcoming_interviews.map((u) => `<div class="fu"><span><b>${esc(whenLocal(u.starts_at))}</b><br><small class="mute">${esc(u.label || 'Interview')} · ${esc(u.company)} · ${esc(u.title)}</small></span><span class="btns">${safeUrl(u.calendar_link) ? `<a class="btn" href="${esc(u.calendar_link)}" target="_blank" rel="noopener noreferrer">Add to calendar</a>` : ''}<button class="btn" data-open="${u.job_id}">Open</button></span></div>`).join('');
+  const soon = p.upcoming_interviews.map((u) => `<div class="fu"><span><b>${esc(whenLocal(u.starts_at))}</b><br><small class="mute">${esc(u.label || 'Interview')} · ${esc(u.company)} · ${esc(u.title)}</small></span><span class="btns">${calLink(u.calendar_link) ? `<a class="btn" href="${esc(calLink(u.calendar_link))}" target="_blank" rel="noopener noreferrer">Add to calendar</a>` : ''}<button class="btn" data-open="${u.job_id}">Open</button></span></div>`).join('');
   const wmax = Math.max(...p.weekly_applied.map((w) => w.applied), 1);
   const weeks = p.weekly_applied.map((w, i) => `<div class="wk" title="Week of ${esc(isoDay(w.week_of))}: ${plural(w.applied, 'application')}"><b>${w.applied || ''}</b><span style="height:calc((100% - 40px) * ${(w.applied / wmax).toFixed(3)})"></span><small>${i === p.weekly_applied.length - 1 ? 'Now' : esc(shortDay(w.week_of))}</small></div>`).join('');
   const src = p.by_source.map((r) => `<tr><td>${esc(r.source)}</td><td class="num">${r.applied}</td><td class="num">${r.heard_back}</td><td class="num">${Math.round((r.heard_back / r.applied) * 100)}%</td></tr>`).join('');
@@ -400,10 +400,10 @@ document.addEventListener('click', async (ev) => {
   else if (d.exportCsv !== undefined) { await guard(() => api.download('/api/export.csv', 'jobledger.csv')); return; }
   else if (d.delInterview && S.sel !== null) { const j = await guard(() => api.delInterview(S.sel!, Number(d.delInterview))); if (j) { setDetail(j); toast('Interview removed.'); await reload(); } return; }
   else if (d.fillLink !== undefined) { await fillFromLink(t as HTMLButtonElement); return; }
-  else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics`, `jobledger-follow-up-${S.sel}.ics`)); return; }
+  else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics?tz=${encodeURIComponent(userTimeZone())}`, `jobledger-follow-up-${S.sel}.ics`)); return; }
   else if (d.icsAll !== undefined) {
     if (!S.jobs.some((j) => !j.closed_reason && j.reminder_on)) { toast('No open jobs have a follow-up yet.'); return; }
-    if (await guard(async () => { await api.download('/api/calendar.ics', 'jobledger-follow-ups.ics'); return true; })) toast('Calendar file downloaded.'); return;
+    if (await guard(async () => { await api.download(`/api/calendar.ics?tz=${encodeURIComponent(userTimeZone())}`, 'jobledger-follow-ups.ics'); return true; })) toast('Calendar file downloaded.'); return;
   }
   else if (d.backup !== undefined) { if (await guard(async () => { await api.download('/api/backup', 'jobledger-backup.json'); return true; })) toast('Backup downloaded.'); return; }
   else if (d.restoreNo !== undefined) S.pendingRestore = null;
