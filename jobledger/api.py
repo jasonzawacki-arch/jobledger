@@ -140,6 +140,19 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
     async def reopen(req):
         return JSONResponse(tracker.reopen(jid(req)))
 
+    async def search(req):
+        return JSONResponse({"ids": tracker.search(req.query_params.get("q", ""))})
+
+    def ics(text: str, name: str) -> Response:
+        return Response(text, media_type="text/calendar; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    async def job_calendar(req):
+        return ics(tracker.calendar(jid(req)), f"jobledger-follow-up-{jid(req)}.ics")
+
+    async def all_calendar(req):
+        return ics(tracker.calendar(), "jobledger-follow-ups.ics")
+
     async def pulse(req):
         return JSONResponse(tracker.pulse())
 
@@ -250,6 +263,9 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
         Route("/api/import", api(import_csv), methods=["POST"]),
         Route("/api/resume", api(resume), methods=["GET", "PUT"]),
         Route("/api/pulse", api(pulse)),
+        Route("/api/search", api(search)),
+        Route("/api/calendar.ics", api(all_calendar)),
+        Route("/api/jobs/{id}/calendar.ics", api(job_calendar)),
         Route("/api/export.csv", api(export_csv)),
         Route("/api/backup", api(backup)),
         Route("/api/restore", api(restore), methods=["POST"]),

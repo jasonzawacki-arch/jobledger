@@ -8,6 +8,8 @@ import re
 import time
 from typing import Callable, Optional
 
+from . import reminders
+
 from . import matcher
 from .db import Database
 from .stages import CLOSED_REASONS, STAGES
@@ -87,17 +89,21 @@ class Tracker:
             last_at = row[0] or r["created_at"]
         closed = r["closed_reason"] is not None
         idle_days = int((now - last_at) // DAY)
-        due = False
+        due, remind = False, None
         if not closed and r["stage"] != 4:
             if r["follow_up_on"]:
+                remind = r["follow_up_on"]
                 due = dt.date.fromisoformat(r["follow_up_on"]) <= self._today()
             elif r["stage"] in (1, 2, 3):
                 due = idle_days >= self.stale_days
+                # the day the idle nudge will fire if nothing happens before then
+                remind = dt.datetime.fromtimestamp(last_at + self.stale_days * DAY, self.tz).date().isoformat()
         return {
             "id": r["id"], "company": r["company"], "title": r["title"], "location": r["location"], "pay": r["pay"],
             "url": r["url"], "posted_on": r["posted_on"], "description": r["description"],
             "stage": r["stage"], "stage_name": STAGES[r["stage"]], "max_stage": r["max_stage"],
             "closed_reason": r["closed_reason"], "follow_up_on": r["follow_up_on"],
+            "reminder_on": remind, "reminder_is_nudge": bool(remind) and not r["follow_up_on"],
             "days_in_stage": int((now - r["stage_changed_at"]) // DAY), "idle_days": idle_days, "follow_up_due": due,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         }
@@ -146,7 +152,19 @@ class Tracker:
             out["events"] = [dict(e) for e in ev]
             out["contacts"] = [dict(r) for r in self.db.conn.execute("SELECT id, name, role, email, last_contacted_on FROM contacts WHERE job_id = ? ORDER BY id", (job_id,))]
             out["prep"] = [dict(r) | {"done": bool(r["done"])} for r in self.db.conn.execute("SELECT id, text, done FROM prep_items WHERE job_id = ? ORDER BY position, id", (job_id,))]
+            out["calendar_link"] = reminders.google_link(out)
             return out
+
+    def calendar(self, job_id: Optional[int] = None) -> str:
+        """An .ics file with the follow-up reminder for one job, or for every open job that has one."""
+        with self.db.lock:
+            if job_id is not None:
+                jobs = [self.get_job(job_id)]
+                if not jobs[0]["reminder_on"]:
+                    raise ValidationError("This job has no follow-up to remind you about")
+            else:
+                jobs = [self.get_job(j["id"]) for j in self.list_jobs() if j["reminder_on"]]
+        return reminders.ics(jobs, self.clock())
 
     def list_jobs(self, include_closed: bool = False) -> list[dict]:
         with self.db.lock:
@@ -156,6 +174,23 @@ class Tracker:
                 + " ORDER BY stage, stage_changed_at DESC, id DESC"
             ).fetchall()
             return [self._view(r, r["last_at"] or r["created_at"]) for r in rows]
+
+    def search(self, query) -> list[int]:
+        """Ids of jobs (open or closed) where every word of the query appears somewhere: the job's own
+        fields, its notes, or its contacts. Case-insensitive."""
+        if not isinstance(query, str) or len(query) > 200:
+            raise ValidationError("Search for up to 200 characters")
+        words = query.casefold().split()
+        if not words:
+            return []
+        with self.db.lock:
+            rows = self.db.conn.execute(
+                "SELECT j.id, j.company || ' ' || j.title || ' ' || j.location || ' ' || j.pay || ' ' || j.description"
+                " || ' ' || COALESCE((SELECT group_concat(text, ' ') FROM events e WHERE e.job_id = j.id AND e.kind = 'note'), '')"
+                " || ' ' || COALESCE((SELECT group_concat(name || ' ' || role || ' ' || email, ' ') FROM contacts c WHERE c.job_id = j.id), '')"
+                " AS hay FROM jobs j ORDER BY j.id"
+            ).fetchall()
+        return [r["id"] for r in rows if all(w in r["hay"].casefold() for w in words)]
 
     def update_job(self, job_id: int, patch: dict) -> dict:
         with self.db.lock:

@@ -144,6 +144,86 @@ class Rules(unittest.TestCase):
             self.assertEqual(t.get_job(j["id"])["follow_up_due"], expect, tz)
 
 
+class Search(unittest.TestCase):
+    def test_matches_fields_notes_and_contacts(self):
+        t, _ = make()
+        a = t.add_job({"company": "Acme Corp", "title": "Data Analyst", "location": "Boston", "description": "Needs Tableau"})
+        b = t.add_job({"company": "Globex", "title": "Analyst", "stage": 1})
+        t.add_note(b["id"], "Spoke with Priya about SQL")
+        t.add_contact(b["id"], {"name": "Dana Ruiz", "role": "Recruiter", "email": "dana@globex.example"})
+        t.close(a["id"], "rejected")
+        self.assertEqual(t.search("acme"), [a["id"]])  # closed jobs are found too
+        self.assertEqual(t.search("ANALYST"), [a["id"], b["id"]])  # case-insensitive
+        self.assertEqual(t.search("tableau"), [a["id"]])  # posting text
+        self.assertEqual(t.search("priya"), [b["id"]])  # notes
+        self.assertEqual(t.search("recruiter dana"), [b["id"]])  # contacts, every word must match
+        self.assertEqual(t.search("analyst boston"), [a["id"]])
+        self.assertEqual(t.search("analyst nowhere"), [])
+        self.assertEqual(t.search("   "), [])
+        with self.assertRaises(ValidationError): t.search("x" * 201)
+        with self.assertRaises(ValidationError): t.search(None)
+
+    def test_like_wildcards_are_plain_text(self):
+        t, _ = make()
+        t.add_job({"company": "A", "title": "x"})
+        self.assertEqual(t.search("%"), [])
+        self.assertEqual(t.search("_"), [])
+
+
+class Reminders(unittest.TestCase):
+    def test_reminder_dates(self):
+        t, c = make()
+        saved = t.add_job({"company": "S", "title": "x"})
+        applied = t.add_job({"company": "A", "title": "x", "stage": 1})
+        dated = t.add_job({"company": "D", "title": "x"})
+        t.update_job(dated["id"], {"follow_up_on": "2027-02-01"})
+        g = lambda j: t.get_job(j["id"])
+        self.assertIsNone(g(saved)["reminder_on"])  # saved, no date: never nags
+        self.assertEqual(g(applied)["reminder_on"], "2027-01-25")  # T0 is 2027-01-15, plus 10 idle days
+        self.assertTrue(g(applied)["reminder_is_nudge"])
+        self.assertEqual(g(dated)["reminder_on"], "2027-02-01")
+        self.assertFalse(g(dated)["reminder_is_nudge"])
+        c.advance(3); t.add_note(applied["id"], "nudged")
+        self.assertEqual(g(applied)["reminder_on"], "2027-01-28")  # activity pushes the nudge back
+        t.move(applied["id"], 4)
+        self.assertIsNone(g(applied)["reminder_on"])  # offers never nag
+        t.close(dated["id"], "withdrawn")
+        self.assertIsNone(g(dated)["reminder_on"])
+
+    def test_calendar_file(self):
+        t, _ = make()
+        a = t.add_job({"company": "Acme, Inc.", "title": "Analyst; Data \\ Ops", "stage": 1, "url": "https://example.com/job"})
+        t.add_contact(a["id"], {"name": "Zoë Ångström-Nakamura", "role": "Recruiter, Talent", "email": "z@example.com"})
+        t.add_job({"company": "Saved Co", "title": "x"})  # no reminder, left out
+        text = t.calendar()
+        self.assertTrue(text.startswith("BEGIN:VCALENDAR\r\n") and text.endswith("END:VCALENDAR\r\n"))
+        self.assertEqual(text.count("BEGIN:VEVENT"), 1)
+        self.assertIn("DTSTART:20270125T090000\r\n", text)
+        self.assertIn("DTEND:20270125T091500\r\n", text)
+        self.assertIn("UID:jobledger-job-1@jobledger.local", text)
+        self.assertIn("TRIGGER:-PT0M", text)
+        for line in text.split("\r\n"):
+            self.assertLessEqual(len(line.encode()), 75, line)
+        unfolded = text.replace("\r\n ", "")
+        self.assertIn("SUMMARY:Follow up: Analyst\\; Data \\\\ Ops at Acme\\, Inc.", unfolded)
+        self.assertIn("Contact: Zoë Ångström-Nakamura\\, Recruiter\\, Talent\\, z@example.com.", unfolded)
+        self.assertEqual(t.calendar(a["id"]).count("BEGIN:VEVENT"), 1)
+        with self.assertRaises(ValidationError): t.calendar(2)  # saved job with no date
+        with self.assertRaises(NotFound): t.calendar(99)
+
+    def test_google_link(self):
+        from urllib.parse import parse_qs, urlsplit
+        t, _ = make()
+        a = t.add_job({"company": "Acme", "title": "Analyst", "stage": 1})
+        link = t.get_job(a["id"])["calendar_link"]
+        u = urlsplit(link)
+        self.assertEqual((u.scheme, u.netloc), ("https", "calendar.google.com"))
+        q = parse_qs(u.query)
+        self.assertEqual(q["dates"], ["20270125T090000/20270125T091500"])
+        self.assertEqual(q["text"], ["Follow up: Analyst at Acme"])
+        self.assertIsNone(t.get_job(t.add_job({"company": "S", "title": "x"})["id"])["calendar_link"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

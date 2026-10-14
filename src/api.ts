@@ -58,6 +58,7 @@ export const api = {
   importCsv: (csv: string) => json<{ imported: number }>('POST', '/api/import', { csv }),
   rewrite: (id: number, requirement: string) => json<Rewrite>('POST', `/api/jobs/${id}/rewrite`, { requirement }, { 'X-Anthropic-Key': getAiKey() }),
   pulse: () => json<Pulse>('GET', '/api/pulse'),
+  search: (q: string) => json<{ ids: number[] }>('GET', `/api/search?q=${encodeURIComponent(q)}`),
   restore: (data: unknown) => json<{ jobs: number }>('POST', '/api/restore', data),
   async download(path: string, filename: string): Promise<void> {
     const blob = await (await raw('GET', path)).blob();

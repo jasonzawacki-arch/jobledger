@@ -2,6 +2,7 @@ export interface Job {
   id: number; company: string; title: string; location: string; pay: string; url: string; posted_on: string; description: string;
   stage: number; stage_name: string; max_stage: number; closed_reason: string | null; follow_up_on: string | null;
   days_in_stage: number; idle_days: number; follow_up_due: boolean; created_at: number; updated_at: number;
+  reminder_on: string | null; reminder_is_nudge: boolean; calendar_link?: string | null;
   events?: JobEvent[]; contacts?: Contact[]; prep?: PrepItem[];
 }
 export interface Contact { id: number; name: string; role: string; email: string; last_contacted_on: string }

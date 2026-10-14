@@ -14,6 +14,8 @@ A local-first job application tracker. Your data lives in one SQLite file on you
 - **Your data stays yours:** CSV export, JSON backup and validated restore (all or nothing).
 - **Resume matching.** Paste your resume once (Data tab) and a job's posting text (Edit details). The Job view lists each requirement as Match, Partial or Gap, with the resume line that supports it and the shared words highlighted. It works by comparing words and common spellings (k8s/Kubernetes, Postgres/PostgreSQL), runs locally and costs nothing.
 - **People and prep.** Keep the recruiter or hiring manager on each job (with a one-tap "Contacted today") and an interview checklist, with an optional standard list.
+- **Search** across company, title, location, pay, posting text, notes and contacts. Every word must match; closed jobs that match are shown too.
+- **Reminders that reach you when the app is closed.** Each job with a follow-up (your date, or the day its idle nudge fires) has *Add to Google Calendar* and *Download .ics* buttons, and the Data tab downloads one calendar file for every open follow-up. Events are at 9:00 AM with an alert. Opening the Google link sends that event's text to Google; nothing else leaves your machine.
 - **Follow-up email drafts.** A plain template filled in from the job and contact. Edit it, copy it, or open it in your email app. Nothing is sent from the app.
 - **CSV import** from a simple spreadsheet (company and title columns, a few optional ones) or from your own export. All or nothing, with the row number in any error.
 - **Optional wording suggestions** (off by default, bring your own Anthropic API key). See below.
@@ -41,6 +43,16 @@ Open http://127.0.0.1:8000. Settings come from environment variables:
 | `JL_TOKEN` | unset | if set, every API call needs it (the UI asks once) |
 | `JL_HOSTS` | unset | extra host names to answer on without a token, comma-separated (e.g. `laptop.local`) |
 | `JL_TZ` | this computer's zone | time zone for follow-up dates, e.g. `America/New_York` |
+
+## Use it on your phone
+
+The simplest private way is [Tailscale](https://tailscale.com/download) (free for personal use):
+
+1. Install Tailscale on the computer running JobLedger and on your phone, signed in to the same account. In the Tailscale admin console, make sure MagicDNS and HTTPS certificates are on (DNS page).
+2. Start JobLedger with `python -m jobledger --tailscale`. It runs `tailscale serve` for you and prints an address like `https://laptop.tail1234.ts.net`.
+3. Open that address in Chrome on your phone, then tap the menu and **Install app**.
+
+Only devices signed in to your Tailscale account can open the address. JobLedger allows that name automatically and stops the HTTPS address when it exits. Setting `JL_TOKEN` as well is still a good idea. Any other HTTPS tunnel works too: list its host name in `JL_HOSTS`, or set `JL_TOKEN`.
 
 ## Wording suggestions (optional, your own key)
 
@@ -77,7 +89,8 @@ Rule tests use an injected clock, so "10 days idle" is tested without waiting. B
 
 ## Honest limits
 
-- **Phone use needs HTTPS.** Android only offers Install app on a secure address. On your home network that means putting the server behind something like a Tailscale or Cloudflare tunnel. Set `JL_TOKEN` before you expose it.
+- **Phone use needs HTTPS** and the computer running JobLedger must be on. `--tailscale` handles the HTTPS part; see above.
+- **Calendar events are copies.** If you change a follow-up date, add it to your calendar again. Re-importing the .ics updates events in calendars that honor event IDs; the Google link always adds a new event.
 - **Single user.** One token at most, no accounts. If you expose it beyond your own machine, put it behind HTTPS and set `JL_TOKEN` (without one, it refuses any host name other than localhost and `JL_HOSTS`). The token is sent as a bearer header and stored in the browser's local storage.
 - **Time zone.** Follow-up dates follow the server computer's time zone (or `JL_TZ`). The CSV export's `created_utc` column stays in UTC.
 - **No automatic updates from email or job sites.** You enter and move jobs yourself.

@@ -166,6 +166,55 @@ class UI(unittest.TestCase):
         self.assertNotIn("/api/", sw.read().decode().split("startsWith")[0])  # never caches data
         with self.assertRaises(Exception): urllib.request.urlopen(self.s.base + "/secret.txt")
 
+    def test_search_filters_board_and_keeps_focus(self):
+        pg = self.page()
+        self.add(pg, "Acme Corp", "Data Analyst")
+        self.add(pg, "Globex", "Product Manager", stage="Saved")
+        pg.click(".card >> text=Globex")
+        pg.fill("textarea[name=text]", "Recruiter Priya said next week")
+        pg.click("[data-note-form] button"); pg.wait_for_selector(".tl >> text=Recruiter Priya")
+        pg.click("[data-go=board]")
+        box = pg.locator("[data-search]")
+        box.click(); box.type("pri", delay=30)
+        pg.wait_for_selector(".search-count >> text=1 job match")
+        self.assertEqual(pg.locator(".board .card").count(), 1)
+        self.assertIn("Globex", pg.inner_text(".board"))
+        self.assertTrue(pg.evaluate("document.activeElement.matches('[data-search]')"))  # still typing
+        box.type("x", delay=30)
+        pg.wait_for_selector(".search-count >> text=Nothing matches")
+        self.assertEqual(pg.locator(".board .card").count(), 0)
+        pg.keyboard.press("Escape")
+        pg.wait_for_function("document.querySelectorAll('.board .card').length === 2")
+        self.assertEqual(pg.locator(".search-count").count(), 0)
+        # closed jobs that match are shown
+        pg.click(".card >> text=Acme Corp"); pg.click("[data-close=rejected]"); pg.click("[data-go=board]")
+        pg.fill("[data-search]", "acme")
+        pg.wait_for_selector(".closed-list .card >> text=Acme Corp")
+        pg.click("[data-search-clear]")
+        pg.wait_for_function("!document.querySelector('.search-count')")
+        self.assertEqual(self.errors, [])
+
+    def test_reminder_links_and_calendar_download(self):
+        pg = self.page()
+        self.add(pg, "Initech", "Analyst")
+        pg.click(".card >> text=Initech")
+        pg.wait_for_selector(".remind")
+        self.assertIn("the nudge day", pg.inner_text(".remind"))
+        href = pg.get_attribute("[data-gcal]", "href")
+        self.assertTrue(href.startswith("https://calendar.google.com/calendar/render?action=TEMPLATE"))
+        self.assertEqual(pg.get_attribute("[data-gcal]", "target"), "_blank")
+        with pg.expect_download() as dl:
+            pg.click("[data-ics]")
+        self.assertIn("BEGIN:VEVENT", Path(dl.value.path()).read_text())
+        pg.fill("[data-fu]", "2031-03-04"); pg.dispatch_event("[data-fu]", "change")
+        pg.wait_for_selector(".remind >> text=this date")
+        self.assertIn("20310304T090000", pg.get_attribute("[data-gcal]", "href"))
+        pg.click("[data-view=data]")
+        with pg.expect_download() as dl:
+            pg.click("[data-ics-all]")
+        self.assertIn("DTSTART:20310304T090000", Path(dl.value.path()).read_text())
+        self.assertEqual(self.errors, [])
+
     def test_drag_and_drop(self):
         pg = self.page()
         self.add(pg, "Dragco", "Analyst")

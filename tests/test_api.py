@@ -165,5 +165,28 @@ class Shutdown(unittest.TestCase):
             s.app.state.db.conn.execute("SELECT 1")
 
 
+class SearchAndCalendar(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls): cls.s = Server()
+    @classmethod
+    def tearDownClass(cls): cls.s.stop()
+
+    def test_search_and_ics(self):
+        c = self.s.call
+        _, a = j(c("POST", "/api/jobs", {"company": "Initech", "title": "Analyst", "stage": 1}))
+        _, b = j(c("POST", "/api/jobs", {"company": "Hooli", "title": "PM"}))
+        self.assertEqual(j(c("GET", "/api/search?q=initech"))[1], {"ids": [a["id"]]})
+        self.assertEqual(c("GET", "/api/search?q=" + "x" * 201)[0], 400)
+        req = urllib.request.Request(self.s.base + f"/api/jobs/{a['id']}/calendar.ics")
+        with urllib.request.urlopen(req) as r:
+            self.assertTrue(r.headers["Content-Type"].startswith("text/calendar"))
+            self.assertIn("attachment", r.headers["Content-Disposition"])
+            self.assertIn(b"BEGIN:VEVENT", r.read())
+        self.assertEqual(c("GET", f"/api/jobs/{b['id']}/calendar.ics")[0], 400)  # saved, no date
+        st, raw = c("GET", "/api/calendar.ics")
+        self.assertEqual(st, 200)
+        self.assertIn(b"Initech", raw); self.assertNotIn(b"Hooli", raw)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,10 +8,12 @@ interface State {
   showClosed: boolean; form: 'add' | 'edit' | null; confirmDelete: boolean; pendingRestore: any | null;
   needToken: boolean; error: string; loaded: boolean;
   rewrites: Record<string, Rewrite | 'busy'>; draft: boolean;
+  query: string; hits: Set<number> | null;
 }
 const S: State = {
   view: 'board', jobs: [], sel: null, detail: null, pulse: null, match: null, resume: '', showClosed: false, form: null,
   confirmDelete: false, pendingRestore: null, needToken: false, error: '', loaded: false, rewrites: {}, draft: false,
+  query: '', hits: null,
 };
 const viewEl = document.getElementById('view') as HTMLElement;
 const stripEl = document.getElementById('strip') as HTMLElement;
@@ -41,8 +43,10 @@ async function guard<T>(fn: () => Promise<T>): Promise<T | undefined> {
   }
 }
 async function refresh(): Promise<void> {
-  const [jobs, pulse, resume] = await Promise.all([api.jobs(), api.pulse(), api.resume()]);
+  const q = S.query.trim();
+  const [jobs, pulse, resume, hits] = await Promise.all([api.jobs(), api.pulse(), api.resume(), q ? api.search(q) : Promise.resolve(null)]);
   S.jobs = jobs; S.pulse = pulse; S.resume = resume.text; S.loaded = true;
+  if (q === S.query.trim()) S.hits = hits ? new Set(hits.ids) : null;
   if (S.sel !== null) {
     if (!jobs.some((j) => j.id === S.sel)) { S.sel = null; S.detail = null; S.match = null; if (S.view === 'job') S.view = 'board'; }
     else [S.detail, S.match] = await Promise.all([api.job(S.sel), api.match(S.sel)]);
@@ -64,18 +68,31 @@ function card(j: Job, draggable: boolean): string {
   return `<button class="card" ${draggable ? 'draggable="true"' : ''} data-open="${j.id}"><span class="ch">${tile(j.company, j.id)}<span><b>${esc(j.company)}</b><small>${esc(j.title)}</small></span></span>
     <span class="row"><span class="mono mute">${j.closed_reason ? 'closed' : j.days_in_stage + 'd here'}</span>${tag}</span></button>`;
 }
-function board(): string {
+const shown = (j: Job) => S.hits === null || S.hits.has(j.id);
+function boardResults(): string {
+  const searching = S.hits !== null;
   const cols = STAGES.map((n, i) => {
-    const list = active().filter((j) => j.stage === i);
+    const list = active().filter((j) => j.stage === i && shown(j));
+    const none = searching ? 'No matches.' : i === 4 ? 'No offers yet.' : 'Drop a job here.';
     return `<section class="col" data-col="${i}" aria-label="${n}"><h3><span class="dot" style="--c:${stColor(i)}"></span>${n}<span class="mono mute">${list.length}</span></h3>${
-      list.map((j) => card(j, true)).join('') || `<div class="empty">${i === 4 ? 'No offers yet.' : 'Drop a job here.'}</div>`}</section>`;
+      list.map((j) => card(j, true)).join('') || `<div class="empty">${none}</div>`}</section>`;
   }).join('');
-  const c = closed();
+  const c = closed().filter(shown);
+  const open = S.showClosed;
   const closedSec = c.length
-    ? `<div class="sect"><button class="btn" data-toggle-closed aria-expanded="${S.showClosed}">${S.showClosed ? 'Hide' : 'Show'} closed (${c.length})</button>${S.showClosed ? `<div class="closed-list">${c.map((j) => card(j, false)).join('')}</div>` : ''}</div>` : '';
-  return `<div class="row" style="margin-bottom:10px"><p class="hint" style="margin:0">Drag a card to another column to move it, or tap it to open.</p><button class="btn pri" data-add>Add job</button></div>${S.form === 'add' ? jobForm(null) : ''}
+    ? `<div class="sect"><button class="btn" data-toggle-closed aria-expanded="${open}">${open ? 'Hide' : 'Show'} closed (${c.length})</button>${open ? `<div class="closed-list">${c.map((j) => card(j, false)).join('')}</div>` : ''}</div>` : '';
+  const count = searching
+    ? `<p class="hint search-count" role="status">${S.hits!.size ? `${plural(S.hits!.size, 'job')} match \u201c${esc(S.query.trim())}\u201d${c.length && !S.showClosed ? ', including closed ones' : ''}.` : `Nothing matches \u201c${esc(S.query.trim())}\u201d.`} <button class="linkbtn" data-search-clear>Clear search</button></p>`
+    : '';
+  return `${count}<div class="board">${cols}</div>${closedSec}`;
+}
+function board(): string {
+  const search = S.jobs.length
+    ? `<label class="search"><span class="sr">Search jobs</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input type="search" data-search placeholder="Search company, title, notes, people" value="${esc(S.query)}" autocomplete="off" enterkeyhint="search"></label>` : '';
+  return `<div class="row toolbar">${search}<button class="btn pri" data-add>Add job</button></div>
+    <p class="hint" style="margin:0 0 10px">Drag a card to another column to move it, or tap it to open.</p>${S.form === 'add' ? jobForm(null) : ''}
     ${S.jobs.length === 0 && S.loaded ? '<div class="empty" style="margin-bottom:12px">Nothing tracked yet. Add your first job to get started.</div>' : ''}
-    <div class="board">${cols}</div>${closedSec}`;
+    <div data-results>${boardResults()}</div>`;
 }
 function jobForm(j: Job | null): string {
   const v = (k: keyof Job) => esc(j ? (j[k] as string) ?? '' : '');
@@ -129,6 +146,13 @@ function draftPanel(j: Job): string {
     <div class="btns"><button class="btn pri" data-copy-draft>Copy to clipboard</button><a class="btn job-link" href="${esc(mail)}">Open in email app</a><button class="btn" data-draft-close>Close</button></div>
     <span class="mute" style="font-size:12.5px">A plain template. Edit it, then copy it or open it in your email app. Nothing is sent from here.</span></div>`;
 }
+function reminderPanel(j: Job): string {
+  if (!j.reminder_on) return '';
+  const when = `${isoDay(j.reminder_on)}, 9:00 AM`;
+  const link = j.calendar_link && safeUrl(j.calendar_link);
+  return `<div class="remind"><span class="mute" style="font-size:13px">Get reminded even when JobLedger is closed: put ${j.reminder_is_nudge ? 'the nudge day' : 'this date'} (<b>${esc(when)}</b>) in your calendar. If the date changes, add it again.</span>
+    <div class="btns">${link ? `<a class="btn" href="${esc(link)}" target="_blank" rel="noopener noreferrer" data-gcal>Add to Google Calendar</a>` : ''}<button class="btn" data-ics>Download .ics</button></div></div>`;
+}
 function jobView(): string {
   const j = S.detail;
   if (!j) return `<div class="empty">Pick a job from the board to see its details.</div>`;
@@ -154,6 +178,7 @@ function jobView(): string {
     <section class="panel"><h3>Follow-up</h3>
       <p class="hint" style="margin:0">${j.closed_reason ? 'Closed jobs are never flagged.' : j.stage === 4 ? 'Offers are not flagged. Take your time.' : j.follow_up_on ? 'You set a date. It is flagged once that day arrives.' : `Without a date, applied-to-interview jobs are flagged after ${S.pulse?.stale_days ?? 10} idle days. You have been quiet for ${plural(j.idle_days, 'day')}.`}</p>
       <div class="btns"><label class="f" style="flex:1;min-width:150px"><span class="sr">Follow-up date</span><input type="date" data-fu value="${esc(j.follow_up_on ?? '')}" ${j.closed_reason ? 'disabled' : ''}></label>${j.follow_up_on ? '<button class="btn" data-fu-clear>Clear date</button>' : ''}</div>
+      ${reminderPanel(j)}
       ${draftPanel(j)}
       ${closeBtns}
       ${j.description ? `<h3>Posting</h3><div class="desc">${esc(j.description)}</div>` : ''}
@@ -229,6 +254,9 @@ function dataView(): string {
     <section class="panel"><h3>Your data</h3>
       <p class="hint" style="margin:0">Everything lives in a SQLite file on the machine running the server. Nothing is sent anywhere.</p>
       <div class="btns"><button class="btn" data-export-csv>Export CSV</button><button class="btn" data-backup>Download backup (JSON)</button></div>
+      <h3>Follow-up reminders</h3>
+      <p class="hint" style="margin:0">One calendar file with a 9:00 AM event and alert for every open job's follow-up (your date, or the day its idle nudge fires). Import it into Google Calendar on the web, Outlook or Apple Calendar so reminders reach you while JobLedger is closed. Importing again updates events in calendars that support it.</p>
+      <div class="btns"><button class="btn" data-ics-all>Download all follow-ups (.ics)</button></div>
       <h3>Import from a spreadsheet</h3>
       <p class="hint" style="margin:0">A CSV with company and title columns. Optional columns: location, pay, url, posted_on, stage, status, follow_up_on. Your own export works too.</p>
       <label class="f"><span class="sr">CSV file</span><input type="file" accept=".csv,text/csv" data-import-file></label>
@@ -250,7 +278,7 @@ function dataView(): string {
       <label class="f">Theme<select data-theme>${['system', 'light', 'dark'].map((t) => `<option value="${t}" ${t === theme ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
       ${getToken() ? '<div class="btns"><button class="btn" data-signout>Forget access token</button></div>' : ''}
       <h3>Install on your phone</h3>
-      <p class="hint" style="margin:0">When this page is opened over HTTPS, Chrome on Android offers Install app, which gives JobLedger its own icon. Plain http works only on the computer running the server.</p>
+      <p class="hint" style="margin:0">When this page is opened over HTTPS, Chrome on Android offers Install app, which gives JobLedger its own icon. The easy way: install Tailscale on your computer and phone, then start JobLedger with <code>python -m jobledger --tailscale</code>. It prints a private https address only your own devices can open.</p>
     </section></div>`;
 }
 function gate(): string {
@@ -289,7 +317,7 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all]');
   if (!t) return;
   const d = t.dataset;
   if (d.view) {
@@ -301,6 +329,7 @@ document.addEventListener('click', async (ev) => {
   else if (d.add !== undefined) { S.form = S.form === 'add' ? null : 'add'; S.error = ''; }
   else if (d.cancelForm !== undefined) { S.form = null; S.error = ''; }
   else if (d.toggleClosed !== undefined) S.showClosed = !S.showClosed;
+  else if (d.searchClear !== undefined) { S.query = ''; S.hits = null; render(); document.querySelector<HTMLInputElement>('[data-search]')?.focus(); return; }
   else if (d.stage !== undefined && S.sel !== null) { await moveTo(S.sel, Number(d.stage)); return; }
   else if (d.close && S.sel !== null) { const j = await guard(() => api.close(S.sel!, d.close!)); if (j) { setDetail(j); toast('Moved off your board.'); } await reload(); return; }
   else if (d.reopen !== undefined && S.sel !== null) { const j = await guard(() => api.reopen(S.sel!)); if (j) { setDetail(j); toast('Back on your board.'); } await reload(); return; }
@@ -340,6 +369,11 @@ document.addEventListener('click', async (ev) => {
   }
   else if (d.keyRemove !== undefined) { setAiKey(''); S.rewrites = {}; toast('Key removed.'); }
   else if (d.exportCsv !== undefined) { await guard(() => api.download('/api/export.csv', 'jobledger.csv')); return; }
+  else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics`, `jobledger-follow-up-${S.sel}.ics`)); return; }
+  else if (d.icsAll !== undefined) {
+    if (!S.jobs.some((j) => !j.closed_reason && j.reminder_on)) { toast('No open jobs have a follow-up yet.'); return; }
+    await guard(() => api.download('/api/calendar.ics', 'jobledger-follow-ups.ics')); toast('Calendar file downloaded.'); return;
+  }
   else if (d.backup !== undefined) { await guard(() => api.download('/api/backup', 'jobledger-backup.json')); toast('Backup downloaded.'); return; }
   else if (d.restoreNo !== undefined) S.pendingRestore = null;
   else if (d.restoreYes !== undefined && S.pendingRestore) {
@@ -422,6 +456,35 @@ document.addEventListener('change', async (ev) => {
     } catch (e) { S.pendingRestore = null; S.error = e instanceof Error && e.message.startsWith('That') ? e.message : 'That file could not be read as a backup.'; }
     render();
   }
+});
+
+/* search: only the results are redrawn, so the box keeps focus and cursor while typing */
+let searchTimer: number | undefined;
+let searchSeq = 0;
+function showResults(): void {
+  const el = document.querySelector<HTMLElement>('[data-results]');
+  if (el) el.innerHTML = boardResults(); else render();
+}
+async function runSearch(): Promise<void> {
+  const q = S.query.trim();
+  const seq = ++searchSeq;
+  if (!q) { S.hits = null; showResults(); return; }
+  const r = await guard(() => api.search(q));
+  if (seq !== searchSeq || !r) return; // a newer search has started, or it failed (guard showed why)
+  S.hits = new Set(r.ids);
+  if (closed().some((j) => S.hits!.has(j.id))) S.showClosed = true;
+  showResults();
+}
+document.addEventListener('input', (ev) => {
+  const t = ev.target as HTMLInputElement;
+  if (!t.matches('[data-search]')) return;
+  S.query = t.value;
+  clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(runSearch, 150);
+});
+document.addEventListener('keydown', (ev) => {
+  const t = ev.target as HTMLInputElement;
+  if (ev.key === 'Escape' && t.matches('[data-search]') && t.value) { t.value = ''; S.query = ''; clearTimeout(searchTimer); void runSearch(); }
 });
 
 /* drag and drop between columns */
