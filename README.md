@@ -10,6 +10,14 @@ A private job application tracker. It needs no account, costs nothing to run and
 
 The phone app works on its own. It can also be pointed at your server (on your computer or in the cloud), and a backup file moves your data between them in either direction.
 
+![JobLedger board on a desktop and a phone (demo data)](docs/screenshots/jobledger.jpg)
+
+<details><summary>The resume-to-posting matcher</summary>
+
+![Each requirement in a posting, matched to a line from your resume or marked as a gap](docs/screenshots/jobledger-match.jpg)
+
+</details>
+
 ![Board, light](docs/board-light.png)
 
 ## What it does
