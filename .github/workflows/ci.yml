@@ -1,0 +1,33 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { python: ["3.11", "3.13"] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}" }
+      - run: pip install -r requirements.txt
+      - run: python -m unittest tests.test_service tests.test_api tests.test_rewrite tests.test_eval -v
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: npm install && npm run build
+      - run: pip install -r requirements.txt playwright && playwright install --with-deps chromium
+      - run: python -m unittest tests.test_ui -v
