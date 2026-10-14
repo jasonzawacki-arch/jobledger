@@ -28,6 +28,8 @@ export interface Options {
   now?: () => number;
   /** For wording suggestions: the page's own fetch, before the engine replaced it. */
   fetch?: typeof fetch;
+  /** True while Google Drive sync is on: new records get ids that cannot clash with another device's. */
+  uniqueIds?: () => boolean;
 }
 
 const DAY = 86400, STALE = 10;
@@ -121,6 +123,7 @@ export class Engine {
   private save: (d: Data) => void;
   private now: () => number;
   private outside?: typeof fetch;
+  private uniqueIds: () => boolean;
 
   constructor(data: Data, opts: Options = {}) {
     this.d = data;
@@ -128,10 +131,15 @@ export class Engine {
     this.save = opts.save ?? (() => undefined);
     this.now = opts.now ?? (() => Date.now() / 1000);
     this.outside = opts.fetch;
+    this.uniqueIds = opts.uniqueIds ?? (() => false);
   }
 
   // ---------- helpers
-  private nextId(list: { id: number }[]): number { return list.reduce((m, x) => Math.max(m, x.id), 0) + 1; }
+  private nextId(list: { id: number }[]): number {
+    const next = list.reduce((m, x) => Math.max(m, x.id), 0) + 1;
+    // With sync on, two devices may add records before they next sync: time plus a random part keeps ids apart.
+    return this.uniqueIds() ? Math.max(next, Date.now() * 100 + Math.floor(Math.random() * 100)) : next;
+  }
   private row(id: number): JobRow { const r = this.d.jobs.find((j) => j.id === id); if (!r) throw new Missing(); return r; }
   private event(jobId: number, kind: string, text: string): void { this.d.events.push({ id: this.nextId(this.d.events), job_id: jobId, at: this.now(), kind, text }); }
   private touch(r: JobRow): void { r.updated_at = this.now(); }

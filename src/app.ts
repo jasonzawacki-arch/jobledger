@@ -294,10 +294,29 @@ function wherePanel(): string {
     ${S.error && S.whereError ? `<p class="err" role="alert">${esc(S.error)}</p>` : ''}
     <span class="mute" style="font-size:12.5px">Switching does not copy jobs. To move them, download a backup on one side and restore it on the other.</span></form>`;
 }
+type GSyncState = { on: boolean; email: string; last: number; busy: boolean; tap: boolean; choose: boolean; msg: string };
+type GSync = { state: GSyncState; link(): Promise<void>; now(tap?: boolean): Promise<void>; off(): void; choose(h: string): Promise<void> };
+const gsync = (): GSync | undefined => (window as unknown as { __JL_SYNC__?: GSync }).__JL_SYNC__;
+/** Optional Google Drive sync (phone app with data on the device). */
+function syncPanel(): string {
+  const G = gsync();
+  if (!G || MODE !== 'phone') return '';
+  const s = G.state, when = s.last ? new Date(s.last).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'not yet';
+  const body = !s.on
+    ? `<p class="hint" style="margin:0">Optional. Keep JobLedger the same on your phone and computer: sign in with a Google account and JobLedger keeps a copy in a private app folder in your Google Drive. The app works fully without it.</p>
+      <div class="btns"><button class="btn pri" data-gs-on ${s.busy ? 'disabled' : ''}>Turn on sync</button></div>`
+    : s.choose
+      ? `<p class="hint" style="margin:0">This device and your Google Drive both have jobs. What should sync do?</p>
+      <div class="btns"><button class="btn pri" data-gs-ch="combine">Combine both</button><button class="btn" data-gs-ch="drive">Use the Drive copy</button><button class="btn" data-gs-ch="device">Replace the Drive copy</button></div>
+      <p class="hint" style="margin:0">Combine keeps every job; where both changed the same job, the newer change wins.</p>`
+      : `<p class="hint" style="margin:0">Syncing${s.email ? ' as <b>' + esc(s.email) + '</b>' : ''}. Last synced ${esc(when)}.${s.tap ? ' Tap Sync now to sync again (Google access lasts about an hour).' : ' Changes sync on their own.'}</p>
+      <div class="btns"><button class="btn pri" data-gs-now ${s.busy ? 'disabled' : ''}>${s.busy ? 'Syncing…' : 'Sync now'}</button><button class="btn" data-gs-off>Turn off on this device</button></div>`;
+  return `<section class="panel" style="grid-column:1/-1"><h3>Sync with Google Drive</h3>${body}${s.msg ? `<p class="hint" role="status" style="margin:0">${esc(s.msg)}</p>` : ''}</section>`;
+}
 function dataView(): string {
   const theme = (() => { try { return localStorage.getItem('jobledger.theme') || 'system'; } catch { return 'system'; } })();
   const pr = S.pendingRestore;
-  return `<div class="two">${BUILD === 'phone' ? wherePanel() : ''}
+  return `<div class="two">${syncPanel()}${BUILD === 'phone' ? wherePanel() : ''}
     <section class="panel"><h3>Your data</h3>
       <p class="hint" style="margin:0">${MODE === 'server' ? (REMOTE ? `Everything lives on your JobLedger server at ${esc(REMOTE)}.` : 'Everything lives in a SQLite file on the machine running the server. Nothing is sent anywhere.')
         : MODE === 'phone' ? 'Everything is saved on this device, in this browser. Nothing is sent anywhere. Download a backup now and then: it is your copy if the phone is lost or the browser data is cleared, and the JobLedger server on a computer can restore it too.'
@@ -368,9 +387,13 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview],[data-use-phone]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch]');
   if (!t) return;
   const d = t.dataset;
+  if (d.gsOn !== undefined) { void gsync()?.link(); return; }
+  if (d.gsNow !== undefined) { void gsync()?.now(true); return; }
+  if (d.gsOff !== undefined) { gsync()?.off(); return; }
+  if (d.gsCh) { void gsync()?.choose(d.gsCh); return; }
   if (d.view) {
     S.view = d.view as View; S.form = null; S.error = ''; S.whereError = false;
     if (S.view === 'job' && !S.detail && S.jobs.length) { await open((active()[0] ?? S.jobs[0]).id); return; }
@@ -607,6 +630,9 @@ document.addEventListener('drop', async (ev) => {
   if (S.jobs.find((j) => j.id === id)?.stage !== stage) await moveTo(id, stage); else render();
 });
 
+// Sync: the panel follows its state; data that arrived from another device is shown at once.
+window.addEventListener('jobledger:sync', () => { if (S.view === 'data') render(); });
+window.addEventListener('jobledger:data', () => { void reload(); });
 window.addEventListener('jobledger:save-failed', () => toast('This browser would not save your change. Check that it has storage space, then download a backup.'));
 
 /* ---------- start */

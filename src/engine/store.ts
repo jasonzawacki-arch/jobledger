@@ -47,6 +47,34 @@ export function save(d: Data): Promise<void> {
   return pending;
 }
 
+/** Change times per record, for Google Drive sync (a second record next to the data). */
+export async function loadMeta(): Promise<Record<string, number>> {
+  try {
+    const db = await open();
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(STORE, 'readonly').objectStore(STORE).get('mt');
+      req.onsuccess = () => resolve((req.result as Record<string, number>) || {});
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    try { return JSON.parse(localStorage.getItem(LS + '.mt') || '{}') as Record<string, number>; } catch { return {}; }
+  }
+}
+export async function saveMeta(mt: Record<string, number>): Promise<void> {
+  const copy = { ...mt };
+  try {
+    const db = await open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(copy, 'mt');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    try { localStorage.setItem(LS + '.mt', JSON.stringify(copy)); } catch { /* best effort */ }
+  }
+}
+
 /** Asks the browser not to clear the data when the phone runs low on space. */
 export function keepData(): void {
   try { void navigator.storage?.persist?.(); } catch { /* not supported */ }

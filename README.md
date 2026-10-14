@@ -48,6 +48,26 @@ To use your server from the phone app, open **Data → Where your data is kept**
 
 *Publishing it (once, for whoever owns the repository):* in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**. The `phone app` workflow then builds and publishes the app and the demo on every push to `main`. Any static host works the same way: serve the contents of `dist/app` over https.
 
+### Sync across devices (optional)
+
+The phone app can keep the same jobs on a phone and a computer through your own Google Drive: **Data > Sync with Google Drive**. It is optional; the app and the demo never ask anyone to sign in.
+
+- JobLedger keeps one file in the hidden app folder of your Drive (`jobledger-sync.json`); no JobLedger server is involved. Every job, event, contact, prep item and interview carries its last change time, and the newer change wins record by record. Deletes travel too.
+- With sync on, new records get ids that cannot clash with another device's. The first sync on a device that already has jobs asks whether to combine both (records whose ids clash are renumbered, with their history), use the Drive copy, or replace it.
+- Google access lasts about an hour without a server. While it lasts, changes sync on their own; after that a **Sync** button appears and one tap syncs again.
+
+### Setting up Google sign-in (once, for the person who publishes the app)
+
+Sync stays hidden until the app has a Google OAuth client ID. One ID works for both Daily and JobLedger, because both are published from the same address.
+
+1. Open https://console.cloud.google.com, sign in, and create a project (for example "Daily and JobLedger").
+2. **APIs & Services > Library**: find **Google Drive API** and click **Enable**.
+3. **Google Auth Platform > Get started**: app name, support email, audience **External**, contact email, then **Create**.
+4. **Data Access > Add or remove scopes**: add `https://www.googleapis.com/auth/drive.appdata`, then **Save**. Only this Drive scope is used; it reaches a hidden folder for this app and nothing else in the user's Drive.
+5. **Audience > Test users**: add your own Google account. While the app is in testing, only test users can sign in. To let anyone sign in, click **Publish app**; drive.appdata is a non-sensitive scope, so Google asks only for basic app verification.
+6. **Clients > Create client**: type **Web application**, and under **Authorized JavaScript origins** add `https://jasonzawacki-arch.github.io`. Click **Create** and copy the client ID (it ends in `.apps.googleusercontent.com`).
+7. Put the ID in `GOOGLE_CLIENT_ID` in `src/engine/gsync-config.ts` here and in Daily (`src/gsync-config.ts`), then push. The client ID is not a secret: it names the app to Google.
+
 ## 2. Server (your computer or the cloud)
 
 ### Run it

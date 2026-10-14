@@ -222,3 +222,8 @@ a.btn:not(.job-link) { color: var(--ink); } a.btn { display: inline-flex; align-
 .srct .num { text-align: right; font-variant-numeric: tabular-nums; }
 .pill.good { background: var(--good-soft, var(--accent-soft)); color: var(--good); }
 .fu .btns a.btn { white-space: nowrap; }
+
+/* Google Drive sync: shown when a tap is needed to sync again */
+#gsc { position: fixed; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); z-index: 50; font: 600 13px/1 system-ui, sans-serif;
+  padding: 9px 14px; border-radius: 999px; border: 0; background: var(--accent, #1d4ed8); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+#gsc[hidden] { display: none; }

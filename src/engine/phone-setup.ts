@@ -2,6 +2,7 @@
 // own JobLedger server (on a computer or in the cloud), its /api requests go there instead.
 import { Engine, install } from './local';
 import { keepData, load, save } from './store';
+import { Tracker, startSync } from './phone-sync';
 
 const SERVER_KEY = 'jobledger.server';
 const w = window as unknown as { __JL_MODE__: string; __JL_REMOTE__?: string };
@@ -20,7 +21,22 @@ if (remote) {
     return realFetch(input, init);
   };
 } else {
-  install(load().then((d) => new Engine(d, { save: (x) => { void save(x); keepData(); }, fetch: realFetch })));
+  const tracker = new Tracker();
+  let sync: { state: { on: boolean } } | null = null;
+  install(load().then(async (d) => {
+    await tracker.start(d);
+    const engine = new Engine(d, {
+      save: (x) => {
+        void save(x); keepData();
+        if (tracker.saved(x)) (window as unknown as { __JL_SYNC_CHANGED__?: () => void }).__JL_SYNC_CHANGED__?.();
+      },
+      fetch: realFetch,
+      uniqueIds: () => !!sync && sync.state.on,
+    });
+    const start = () => { sync = startSync(engine, tracker); };
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+    return engine;
+  }));
 }
 
 /** Checks that a JobLedger server answers at this address, then uses it from now on (after a reload). */
