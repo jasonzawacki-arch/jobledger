@@ -234,6 +234,7 @@ function matchPanel(): string {
   const note = `<div class="guard">${shield}<span>Matching compares words only. It shows lines copied from your own resume as evidence and never writes or adds anything, so it cannot invent experience. A "Match" means shared wording, not a promise you qualify.${aiHint}</span></div>`;
   let inner: string;
   if (!m || !m.has_posting) inner = '<div class="empty">Paste the posting text with <b>Edit details</b> to see how it lines up with your resume.</div>';
+  else if (m.note) inner = `<div class="empty">${esc(m.note)}</div>`;
   else if (!m.has_resume) inner = '<div class="empty">Add your resume first. <button class="btn" data-view="data">Open Data</button></div>';
   else if (!m.requirements.length) inner = '<div class="empty">No requirement lines were found in that posting. Bulleted requirements work best.</div>';
   else {
@@ -402,9 +403,9 @@ document.addEventListener('click', async (ev) => {
   else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics`, `jobledger-follow-up-${S.sel}.ics`)); return; }
   else if (d.icsAll !== undefined) {
     if (!S.jobs.some((j) => !j.closed_reason && j.reminder_on)) { toast('No open jobs have a follow-up yet.'); return; }
-    await guard(() => api.download('/api/calendar.ics', 'jobledger-follow-ups.ics')); toast('Calendar file downloaded.'); return;
+    if (await guard(async () => { await api.download('/api/calendar.ics', 'jobledger-follow-ups.ics'); return true; })) toast('Calendar file downloaded.'); return;
   }
-  else if (d.backup !== undefined) { await guard(() => api.download('/api/backup', 'jobledger-backup.json')); toast('Backup downloaded.'); return; }
+  else if (d.backup !== undefined) { if (await guard(async () => { await api.download('/api/backup', 'jobledger-backup.json'); return true; })) toast('Backup downloaded.'); return; }
   else if (d.restoreNo !== undefined) S.pendingRestore = null;
   else if (d.restoreYes !== undefined && S.pendingRestore) {
     const r = await guard(() => api.restore(S.pendingRestore));

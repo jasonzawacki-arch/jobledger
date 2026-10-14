@@ -72,6 +72,10 @@ Add an Anthropic API key on the Data tab and a "Suggest wording" button appears 
 
 `python eval/run.py` scores it against 74 hand-labeled requirements in three sets. Two were used to tune it (30 of 33 and 14 of 16 agree). The third, 25 labels written before the latest changes and never used to adjust it, is the honest number: 80% agree (76% before those changes). It has never called a true gap a match in any set; its misses lean cautious (calling a match "partial"). These are small samples, so treat the percentages as a rough guide, not a guarantee. Tests fail if false matches appear or accuracy drops below a floor.
 
+## Preview without the server
+
+`npm run build && python preview/build_preview.py` writes `dist/preview.html`: the real interface with demo data and a small in-page stand-in for the server (`preview/mock.js`), for trying the UI anywhere, including as a hosted page. Changes stay in the page until reload; reading links, downloads, imports and wording suggestions need the real server.
+
 ## Tests
 
 ```bash

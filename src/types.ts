@@ -30,4 +30,5 @@ export interface MatchItem {
 export interface Match {
   has_resume: boolean; has_posting: boolean; requirements: MatchItem[]; score: number | null;
   counts: { match: number; partial: number; gap: number };
+  note?: string;
 }
