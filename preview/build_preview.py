@@ -1,7 +1,8 @@
-"""Builds dist/preview.html: the real JobLedger interface with demo data and an in-page stand-in for the server.
+"""Builds dist/preview.html: the demo build of JobLedger (the phone engine in demo mode) with sample data.
 
 Run after `npm run build`:   python preview/build_preview.py
-The demo data and matcher results come from the real Python code, so the preview shows what the app shows.
+The sample data comes from the real Python demo loader, so the preview shows what the app shows. The result is a
+single page that runs anywhere, including as a hosted page that cannot download files or reach other sites.
 """
 from __future__ import annotations
 
@@ -16,18 +17,16 @@ sys.path.insert(0, str(ROOT))
 
 from jobledger.__main__ import load_demo  # noqa: E402
 from jobledger.db import Database  # noqa: E402
-from jobledger.service import DEFAULT_PREP, Tracker  # noqa: E402
+from jobledger.service import Tracker  # noqa: E402
 
 
 def snapshot() -> dict:
     t = Tracker(Database())
     load_demo(t)
-    b = t.backup()
-    return {"made_at": time.time(), "backup": b, "resume": b["resume"], "default_prep": DEFAULT_PREP,
-            "matches": {str(j["id"]): t.match_job(j["id"]) for j in b["jobs"]}}
+    return {"made_at": time.time(), "backup": t.backup()}
 
 
-BANNER = """<div class="pv" role="note"><b>Preview</b><span>Sample data. Changes stay on this page until you reload. Reading links, downloads and wording suggestions need the full app.</span></div>"""
+BANNER = """<div class="pv" role="note"><b>Preview</b><span>Sample data. Changes stay on this page until you reload. Downloads, imports and wording suggestions need the phone app or the full app.</span></div>"""
 
 PREVIEW_CSS = """
 /* preview only */
@@ -43,14 +42,13 @@ if((t==='light'||t==='dark')&&!localStorage.getItem('jobledger.theme'))localStor
 
 
 def build() -> Path:
-    html = (ROOT / "dist" / "index.html").read_text("utf-8")
+    html = (ROOT / "dist" / "demo" / "index.html").read_text("utf-8")
     style = re.search(r"<style>(.*?)</style>", html, re.S).group(1)
     body = re.search(r"<body>(.*)</body>", html, re.S).group(1)
     app_js = re.search(r"<script>(.*)</script>", body, re.S).group(1)
     body_markup = body[: body.index("<script>")]
     body_markup = body_markup.replace('<div class="wrap">', BANNER + '\n<div class="wrap">', 1)
     data = json.dumps(snapshot()).replace("</", "<\\/")
-    mock = (ROOT / "preview" / "mock.js").read_text("utf-8")
     page = f"""<title>JobLedger Preview</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="color-scheme" content="light dark">
@@ -58,11 +56,16 @@ def build() -> Path:
 {THEME_SHIM}
 {body_markup}
 <script>window.__JL_SNAPSHOT__ = {data};</script>
-<script>{mock}</script>
 <script>{app_js}</script>
 """
     out = ROOT / "dist" / "preview.html"
     out.write_text(page, "utf-8")
+    # The same demo as a normal web page, for hosting next to the phone app (dist/app/demo/).
+    site = ROOT / "dist" / "app" / "demo"
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "index.html").write_text('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+                                     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+                                     '<link rel="icon" href="../icon-192.png">\n</head>\n<body>\n' + page + '</body>\n</html>\n', "utf-8")
     return out
 
 

@@ -36,7 +36,13 @@ def _hostname(value: str) -> str:
 
 def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir: Optional[str] = None,
              clock: Callable[[], float] = time.time, rewriter: Optional[rw.Rewriter] = None,
-             hosts: Iterable[str] = (), tz=None, read_posting: Optional[Callable[[str], dict]] = None) -> Starlette:
+             hosts: Iterable[str] = (), tz=None, read_posting: Optional[Callable[[str], dict]] = None,
+             origins: Iterable[str] = ()):
+    # Web addresses of JobLedger phone apps allowed to use this server from another site (JL_ORIGINS), such as
+    # https://you.github.io. That only makes sense behind a password, so a token is required for it.
+    allowed_origins = {o.strip().rstrip("/").lower() for o in origins if o.strip()}
+    if allowed_origins and not token:
+        raise ValueError("JL_ORIGINS needs JL_TOKEN: a server other sites can reach must have a password")
     db = Database(db_path)
     tracker = Tracker(db, clock, tz=tz)
     # Without a token, only answer to names that point at this machine, unless more are listed (JL_HOSTS).
@@ -62,8 +68,10 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
             return "This server only answers on localhost. Set JL_TOKEN, or list the name in JL_HOSTS."
         if req.method in SAFE_METHODS:
             return None
-        # Browsers always send Origin on cross-site writes; it must name this same host.
+        # Browsers always send Origin on cross-site writes; it must name this same host, or a phone app you allowed.
         origin = req.headers.get("origin")
+        if origin is not None and origin.rstrip("/").lower() in allowed_origins:
+            return None
         if origin is not None and urlsplit(origin).netloc.lower() != req.headers.get("host", "").lower():
             return "Requests from other sites are not allowed"
         if req.headers.get("sec-fetch-site") == "cross-site":
@@ -303,4 +311,34 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.tracker = tracker
     app.state.db = db
-    return app
+    return _Cors(app, allowed_origins) if allowed_origins else app
+
+
+class _Cors:
+    """Lets the listed phone-app addresses call /api from their own site (the browser's CORS rules).
+    Every request still needs the token; this only stops the browser from blocking the answer."""
+
+    HEADERS = [(b"access-control-allow-methods", b"GET, POST, PUT, PATCH, DELETE"),
+               (b"access-control-allow-headers", b"authorization, content-type, x-anthropic-key"),
+               (b"access-control-max-age", b"600"), (b"vary", b"origin")]
+
+    def __init__(self, app, origins: set[str]):
+        self.app, self.origins = app, origins
+        self.state = app.state
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+        origin = dict(scope["headers"]).get(b"origin", b"").decode("latin-1")
+        if origin.rstrip("/").lower() not in self.origins:
+            return await self.app(scope, receive, send)
+        extra = [(b"access-control-allow-origin", origin.encode("latin-1"))] + self.HEADERS
+        if scope["method"] == "OPTIONS":
+            await send({"type": "http.response.start", "status": 204, "headers": extra})
+            return await send({"type": "http.response.body", "body": b""})
+
+        async def with_cors(msg):
+            if msg["type"] == "http.response.start":
+                msg = {**msg, "headers": list(msg.get("headers", [])) + extra}
+            await send(msg)
+        return await self.app(scope, receive, with_cors)

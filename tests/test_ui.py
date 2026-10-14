@@ -161,7 +161,8 @@ class UI(unittest.TestCase):
         m = _j.loads(urllib.request.urlopen(self.s.base + "/manifest.webmanifest").read())
         self.assertEqual(m["display"], "standalone")
         for icon in m["icons"]:
-            r = urllib.request.urlopen(self.s.base + icon["src"]); self.assertEqual(r.headers["Content-Type"], "image/png")
+            from urllib.parse import urljoin
+            r = urllib.request.urlopen(urljoin(self.s.base + "/manifest.webmanifest", icon["src"])); self.assertEqual(r.headers["Content-Type"], "image/png")
         sw = urllib.request.urlopen(self.s.base + "/sw.js"); self.assertIn("javascript", sw.headers["Content-Type"])
         self.assertNotIn("/api/", sw.read().decode().split("startsWith")[0])  # never caches data
         with self.assertRaises(Exception): urllib.request.urlopen(self.s.base + "/secret.txt")

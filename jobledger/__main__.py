@@ -1,4 +1,4 @@
-"""Run with: python -m jobledger   (env: JL_DB, JL_TOKEN, JL_HOST, JL_PORT, JL_HOSTS, JL_TZ; flags: --demo, --tailscale)"""
+"""Run with: python -m jobledger   (env: JL_DB, JL_TOKEN, JL_HOST, JL_PORT, JL_HOSTS, JL_TZ, JL_ORIGINS; flags: --demo, --tailscale)"""
 from __future__ import annotations
 
 import datetime as dt
@@ -102,7 +102,13 @@ def main() -> None:
         print("  then tap the menu (three dots) and Install app.")
         if not token:
             print("  Tip: set JL_TOKEN too, so a shared or lost device on your tailnet still needs it.")
-    app = make_app(os.environ.get("JL_DB", "jobledger.sqlite3"), token, hosts=hosts, tz=time_zone())
+    origins = [o for o in os.environ.get("JL_ORIGINS", "").split(",") if o.strip()]
+    try:
+        app = make_app(os.environ.get("JL_DB", "jobledger.sqlite3"), token, hosts=hosts, tz=time_zone(), origins=origins)
+    except ValueError as e:
+        sys.exit(f"{e}. Set JL_TOKEN to a password, then start again.")
+    if origins:
+        print("Phone apps allowed to connect: " + ", ".join(origins))
     if "--demo" in sys.argv:
         load_demo(app.state.tracker)
     print(f"JobLedger on http://{host}:{port}" + ("  (token required)" if token else ""))

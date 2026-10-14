@@ -1,0 +1,53 @@
+// Saves the phone app's data in the browser's own database (IndexedDB), with localStorage as a fallback.
+// The whole data set is one record in backup format, written after every change.
+import { Data, emptyData } from './local';
+
+const DB = 'jobledger', STORE = 'state', KEY = 'data', LS = 'jobledger.data';
+
+function open(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function load(): Promise<Data> {
+  try {
+    const db = await open();
+    const data = await new Promise<Data | undefined>((resolve, reject) => {
+      const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(KEY);
+      req.onsuccess = () => resolve(req.result as Data | undefined);
+      req.onerror = () => reject(req.error);
+    });
+    if (data) return data;
+  } catch { /* fall through to localStorage */ }
+  try { const raw = localStorage.getItem(LS); if (raw) return JSON.parse(raw) as Data; } catch { /* nothing saved */ }
+  return emptyData();
+}
+
+let pending: Promise<void> = Promise.resolve();
+/** Saves in order; a failed save is reported once on the page. */
+export function save(d: Data): Promise<void> {
+  const copy = JSON.parse(JSON.stringify(d)) as Data;
+  pending = pending.then(async () => {
+    try {
+      const db = await open();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(copy, KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {
+      try { localStorage.setItem(LS, JSON.stringify(copy)); } catch { window.dispatchEvent(new CustomEvent('jobledger:save-failed')); }
+    }
+  });
+  return pending;
+}
+
+/** Asks the browser not to clear the data when the phone runs low on space. */
+export function keepData(): void {
+  try { void navigator.storage?.persist?.(); } catch { /* not supported */ }
+}

@@ -1,6 +1,14 @@
 # JobLedger
 
-A local-first job application tracker. Your data lives in one SQLite file on your own machine. It costs nothing to run, needs no account and sends nothing anywhere.
+A private job application tracker. It needs no account, costs nothing to run and sends nothing anywhere unless you ask. The same interface runs three ways:
+
+| | Your data lives | You need | Fill from link |
+|---|---|---|---|
+| **[Phone app](https://jasonzawacki-arch.github.io/jobledger/)** | on your phone | Chrome on Android (or any browser) | only when connected to your server |
+| **Server** | in a SQLite file on your computer or a cloud machine | Python 3.11+ and Node 18+ | yes |
+| **[Demo](https://jasonzawacki-arch.github.io/jobledger/demo/)** | nowhere: sample data, reset on reload | a browser | no |
+
+The phone app works on its own. It can also be pointed at your server (on your computer or in the cloud), and a backup file moves your data between them in either direction.
 
 ![Board, light](docs/board-light.png)
 
@@ -15,25 +23,38 @@ A local-first job application tracker. Your data lives in one SQLite file on you
 - **Interviews.** Add interviews to a job with a date, time, length, what it is and where (address or video link). Each has an *Add to Google Calendar* button, and the calendar file on the Data tab includes upcoming interviews with an alert an hour before. While an interview is coming up, the job is not flagged for a follow-up, and its board card shows the next interview.
 - **Pulse** dashboard: active jobs, how often applications hear back (reached a screen or later, or a rejection) and the median days until they do, applications per week for the last eight weeks, results by source, interviews coming up in the next two weeks, how far applications get (counted by the furthest stage each one ever reached, so a rejected interview still counts), and what needs a follow-up.
 - **Your data stays yours:** CSV export, JSON backup and validated restore (all or nothing).
-- **Resume matching.** Paste your resume once (Data tab) and a job's posting text (Edit details). The Job view lists each requirement as Match, Partial or Gap, with the resume line that supports it and the shared words highlighted. It works by comparing words, word forms (deliver, delivering, delivered) and common spellings (k8s/Kubernetes, Postgres/PostgreSQL), and counts a named tool as evidence of its general skill (SQLite shows databases; Salesforce shows CRM), but never the other way round. It runs locally and costs nothing.
+- **Resume matching.** Paste your resume once (Data tab) and a job's posting text (Edit details). The Job view lists each requirement as Match, Partial or Gap, with the resume line that supports it and the shared words highlighted. It works the same in the phone app and on the server, by comparing words, word forms (deliver, delivering, delivered) and common spellings (k8s/Kubernetes, Postgres/PostgreSQL), and counts a named tool as evidence of its general skill (SQLite shows databases; Salesforce shows CRM), but never the other way round. It runs locally and costs nothing.
 - **People and prep.** Keep the recruiter or hiring manager on each job (with a one-tap "Contacted today") and an interview checklist, with an optional standard list.
 - **Search** across company, title, location, pay, posting text, notes and contacts. Every word must match; closed jobs that match are shown too.
 - **Reminders that reach you when the app is closed.** Each job with a follow-up (your date, or the day its idle nudge fires) has *Add to Google Calendar* and *Download .ics* buttons, and the Data tab downloads one calendar file for every open follow-up. Events are at 9:00 AM with an alert. Opening the Google link sends that event's text to Google; nothing else leaves your machine.
 - **Follow-up email drafts.** A plain template filled in from the job and contact. Edit it, copy it, or open it in your email app. Nothing is sent from the app.
 - **CSV import** from a simple spreadsheet (company and title columns, a few optional ones) or from your own export. All or nothing, with the row number in any error.
 - **Optional wording suggestions** (off by default, bring your own Anthropic API key). See below.
-- **Installable on Android** (Chrome's Install app) when served over HTTPS.
+- **Installable on Android** as a standalone phone app that works offline, or from your own server over HTTPS.
 - Liquid-glass interface in light and dark, usable at phone width.
 
 | Job, dark | Pulse, phone |
 |---|---|
 | ![](docs/job-dark.png) | ![](docs/pulse-phone.png) |
 
-## Run it
+## 1. Phone app (no computer needed)
+
+1. Open **https://jasonzawacki-arch.github.io/jobledger/** in Chrome on your Android phone.
+2. Tap the menu (three dots) and **Install app**. JobLedger gets its own icon and works offline.
+
+Everything is saved in the phone's browser storage. Download a backup from the Data tab now and then: it is your copy if the phone is lost or Chrome's data is cleared, and the server can restore it too. Fill from link needs the server, because a phone app is not allowed to read other websites; paste the posting text instead.
+
+To use your server from the phone app, open **Data → Where your data is kept** and enter the server's https address. The server has to allow the app (see *Use the phone app with your server* below). You can switch back to the phone at any time; switching never copies or deletes jobs.
+
+*Publishing it (once, for whoever owns the repository):* in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**. The `phone app` workflow then builds and publishes the app and the demo on every push to `main`. Any static host works the same way: serve the contents of `dist/app` over https.
+
+## 2. Server (your computer or the cloud)
+
+### Run it
 
 ```bash
 pip install -r requirements.txt
-npm install && npm run build      # builds dist/index.html (needs Node 18+)
+npm install && npm run build      # builds all three versions into dist/ (needs Node 18+)
 python -m jobledger --demo        # --demo loads made-up sample jobs into an empty database
 ```
 
@@ -46,8 +67,9 @@ Open http://127.0.0.1:8000. Settings come from environment variables:
 | `JL_TOKEN` | unset | if set, every API call needs it (the UI asks once) |
 | `JL_HOSTS` | unset | extra host names to answer on without a token, comma-separated (e.g. `laptop.local`) |
 | `JL_TZ` | this computer's zone | time zone for follow-up dates, e.g. `America/New_York` |
+| `JL_ORIGINS` | unset | phone-app addresses allowed to use this server, e.g. `https://you.github.io` (needs `JL_TOKEN`) |
 
-## Use it on your phone
+### Open the server's own page on your phone
 
 The simplest private way is [Tailscale](https://tailscale.com/download) (free for personal use):
 
@@ -59,22 +81,45 @@ On Windows, double-click `start-jobledger.cmd` instead of step 2 (it builds the 
 
 Only devices signed in to your Tailscale account can open the address. JobLedger allows that name automatically and stops the HTTPS address when it exits. Setting `JL_TOKEN` as well is still a good idea. Any other HTTPS tunnel works too: list its host name in `JL_HOSTS`, or set `JL_TOKEN`.
 
+### Use the phone app with your server
+
+Start the server with a password and the phone app's address, over https (Tailscale or your cloud host provides it):
+
+```bash
+JL_TOKEN=pick-a-password JL_ORIGINS=https://jasonzawacki-arch.github.io python -m jobledger --tailscale
+```
+
+(On Windows, set both in `start-jobledger.cmd`.) Then in the phone app, open **Data → Where your data is kept**, enter the server's address and the password. The server refuses other sites even then, and every request still needs the password. Plain `http://` addresses are blocked by the browser, except `localhost`.
+
+### Going live in the cloud
+
+Not needed for the phone app, which works on its own. A cloud server is for having your data on a machine that is always on, with Fill from link available from anywhere. Any host that runs Python and gives you an https address works (a small virtual server, or a platform such as Fly.io or Render). What it needs:
+
+- Build first: `npm install && npm run build`, then `pip install -r requirements.txt`.
+- Run `python -m jobledger` with `JL_HOST=0.0.0.0`, the host's port in `JL_PORT`, and `JL_DB` pointing at a disk that survives restarts (the SQLite file is your data).
+- Always set `JL_TOKEN`. Set `JL_ORIGINS` to the phone app's address if you will use the phone app with it.
+- Keep backups: download one from the Data tab now and then, or copy the SQLite file.
+
+This has not been tried on a specific provider yet, so expect a little setup on whichever you pick.
+
+## 3. Demo
+
+**https://jasonzawacki-arch.github.io/jobledger/demo/** is the phone app running on made-up sample data. Changes stay on the page until you reload, and nothing is saved, so it is the place to try the interface. Downloads, imports and wording suggestions are switched off there.
+
+`npm run build && python preview/build_preview.py` builds it: `dist/app/demo/index.html` for the website and `dist/preview.html` as a single file for hosts that add their own page wrapper. The sample data comes from the server's `--demo` loader.
+
 ## Wording suggestions (optional, your own key)
 
 Add an Anthropic API key on the Data tab and a "Suggest wording" button appears under each matched requirement. It sends that one resume line and that one requirement to Claude and shows the reply next to your original with every changed word highlighted.
 
-- The line is always read from your stored resume on the server, never from the browser request.
-- The key stays in your browser's local storage and travels only in a header on those requests. The server uses it once and does not store or log it.
+- The line is always read from your stored resume, never from the request.
+- The key stays in your browser's local storage. With the server, it travels only in a header on those requests and the server uses it once without storing or logging it. In the phone app, the phone sends the request straight to Anthropic.
 - Each suggestion is a short request on your own account (the default model is `claude-haiku-5-5`, change it with `JL_MODEL`). Without a key, nothing is ever sent anywhere.
 - A check rejects replies that add numbers, names or tools that are not in the original line. This catches the obvious ways to invent things. It is not a proof, so read each suggestion before you use it.
 
 ## How accurate is the matcher?
 
 `python eval/run.py` scores it against 74 hand-labeled requirements in three sets. Two were used to tune it (30 of 33 and 14 of 16 agree). The third, 25 labels written before the latest changes and never used to adjust it, is the honest number: 80% agree (76% before those changes). It has never called a true gap a match in any set; its misses lean cautious (calling a match "partial"). These are small samples, so treat the percentages as a rough guide, not a guarantee. Tests fail if false matches appear or accuracy drops below a floor.
-
-## Preview without the server
-
-`npm run build && python preview/build_preview.py` writes `dist/preview.html`: the real interface with demo data and a small in-page stand-in for the server (`preview/mock.js`), for trying the UI anywhere, including as a hosted page. Changes stay in the page until reload; reading links, downloads, imports and wording suggestions need the real server.
 
 ## Tests
 
@@ -83,7 +128,7 @@ python -m unittest discover -s tests -t .   # rules, API over real HTTP, matcher
 npm run typecheck
 ```
 
-Rule tests use an injected clock, so "10 days idle" is tested without waiting. Browser tests (Playwright) cover add, drag, notes, close, delete confirmation, backup and restore, escaping of hostile text, phone width, themes and the token prompt. They skip themselves if Playwright or the built UI is missing. The Anthropic client is tested against a local fake; the real API is never called in tests.
+Rule tests use an injected clock, so "10 days idle" is tested without waiting. Browser tests (Playwright) cover add, drag, notes, close, delete confirmation, backup and restore, escaping of hostile text, phone width, themes and the token prompt. Phone-app tests serve `dist/app` as plain files and check that data survives a reload, that it works offline, that backups move between phone and server both ways, CSV and calendar files, wording suggestions against a fake Anthropic, connecting to a server and back, and that the app never calls a JobLedger server on its own. A parity test runs every labeled matcher case through both the Python and the TypeScript matcher and requires identical results (needs Node). Browser tests skip themselves if Playwright or the built files are missing; the real Anthropic API is never called.
 
 ## Design notes
 
@@ -91,14 +136,16 @@ Rule tests use an injected clock, so "10 days idle" is tested without waiting. B
 - Schema is versioned with `PRAGMA user_version`; the app refuses to open a database from a newer version.
 - CSV cells that start with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets do not run them as formulas.
 - The UI escapes all text before rendering and only links http(s) addresses.
-- The UI is TypeScript compiled by a small dependency-free `build.mjs` into one HTML file.
+- The UI is TypeScript compiled by a small dependency-free `build.mjs` into one HTML file, three times: for the server (`dist/index.html`), the phone app (`dist/app/`) and the demo (`dist/demo/`).
+- The phone app and the demo use the phone engine (`src/engine/`), a TypeScript twin of the server's rules that answers the same `/api` requests inside the page, so the interface code is identical in all three. Its data is kept in backup format in the browser's IndexedDB. The matcher exists in both languages and a test keeps them identical; when you change a rule, change `service.py` and `src/engine/local.ts` together.
 - Other websites open in your browser cannot use the API. Writes from another origin are refused, request bodies must be `application/json` (which a plain form cannot send), and without a token the server only answers to `localhost`, `127.0.0.1` or names in `JL_HOSTS`, which blocks DNS rebinding.
 - The token is accepted only in the `Authorization` header, never in the URL, so it does not end up in logs or history.
 - The database is closed cleanly when the server stops.
 
 ## Honest limits
 
-- **Phone use needs HTTPS** and the computer running JobLedger must be on. `--tailscale` handles the HTTPS part; see above.
+- **Phone app data lives in the browser.** Clearing Chrome's site data or uninstalling the app deletes it, and the phone app does not sync between devices by itself. Keep backups, or connect it to your server.
+- **The server's own page on a phone needs HTTPS** and the computer must be on. `--tailscale` handles the HTTPS part; see above.
 - **Calendar events are copies.** If you change a follow-up date, add it to your calendar again. Re-importing the .ics updates events in calendars that honor event IDs; the Google link always adds a new event.
 - **Single user.** One token at most, no accounts. If you expose it beyond your own machine, put it behind HTTPS and set `JL_TOKEN` (without one, it refuses any host name other than localhost and `JL_HOSTS`). The token is sent as a bearer header and stored in the browser's local storage.
 - **Time zone.** Follow-up dates follow the server computer's time zone (or `JL_TZ`). Calendar links and files use the time zone of the phone or browser you tap them on, so a 9:00 AM reminder lands at 9:00 AM where you are, whatever zone your Google account is set to. The CSV export's `created_utc` column stays in UTC.

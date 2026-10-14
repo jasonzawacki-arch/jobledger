@@ -2,18 +2,24 @@ import { api, ApiError, getAiKey, getToken, setAiKey, setToken } from './api';
 import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, SOURCES, STAGES } from './types';
 import { calLink, esc, userTimeZone, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
 
+/** Which build this is: served by the Python server, the installable phone app, or the demo. */
+const BUILD: 'server' | 'phone' | 'demo' = ((window as unknown as { __JL_MODE__?: string }).__JL_MODE__ as 'phone' | 'demo') || 'server';
+/** The JobLedger server the phone app is connected to, if any. */
+const REMOTE: string = (window as unknown as { __JL_REMOTE__?: string }).__JL_REMOTE__ || '';
+/** Where the data lives: 'server' (a JobLedger server), 'phone' (saved on this device) or 'demo' (sample data, not saved). */
+const MODE: 'server' | 'phone' | 'demo' = BUILD === 'phone' && REMOTE ? 'server' : BUILD;
 type View = 'board' | 'job' | 'pulse' | 'data';
 interface State {
   view: View; jobs: Job[]; sel: number | null; detail: Job | null; pulse: Pulse | null; match: Match | null; resume: string;
   showClosed: boolean; form: 'add' | 'edit' | null; confirmDelete: boolean; pendingRestore: any | null;
   needToken: boolean; error: string; loaded: boolean;
   rewrites: Record<string, Rewrite | 'busy'>; draft: boolean;
-  query: string; hits: Set<number> | null;
+  query: string; hits: Set<number> | null; whereError: boolean;
 }
 const S: State = {
   view: 'board', jobs: [], sel: null, detail: null, pulse: null, match: null, resume: '', showClosed: false, form: null,
   confirmDelete: false, pendingRestore: null, needToken: false, error: '', loaded: false, rewrites: {}, draft: false,
-  query: '', hits: null,
+  query: '', hits: null, whereError: false,
 };
 const viewEl = document.getElementById('view') as HTMLElement;
 const stripEl = document.getElementById('strip') as HTMLElement;
@@ -104,7 +110,7 @@ function jobForm(j: Job | null): string {
       <label class="f">Title<input name="title" required maxlength="160" value="${v('title')}"></label>
       <label class="f">Location<input name="location" maxlength="120" value="${v('location')}"></label>
       <label class="f">Pay<input name="pay" maxlength="80" value="${v('pay')}"></label>
-      <label class="f">Posting link<span class="inline"><input name="url" type="url" maxlength="500" placeholder="https://" value="${v('url')}"><button class="btn" type="button" data-fill-link>Fill from link</button></span></label>
+      <label class="f">Posting link<span class="inline"><input name="url" type="url" maxlength="500" placeholder="https://" value="${v('url')}">${MODE === 'server' ? '<button class="btn" type="button" data-fill-link>Fill from link</button>' : ''}</span></label>
       <label class="f">Posted on<input name="posted_on" type="date" value="${v('posted_on')}"></label>
       <label class="f">Where you found it<input name="source" maxlength="80" list="sources" placeholder="LinkedIn, referral…" value="${v('source')}"><datalist id="sources">${SOURCES.map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
       ${j ? '' : `<label class="f">Starting stage<select name="stage">${STAGES.slice(0, 2).map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select></label>`}
@@ -276,12 +282,26 @@ function pulseView(): string {
       <p class="hint" style="margin:0">"Heard back" means it reached a screen or later, or was rejected. Set the source with Edit details.</p>` : '<div class="empty">Apply to a few jobs to see this.</div>'}</section>
   </div>`;
 }
+function wherePanel(): string {
+  const here = esc(location.origin);
+  const body = REMOTE
+    ? `<p class="hint" style="margin:0">Using your JobLedger server at <b>${esc(REMOTE)}</b>. Fill from link works here. The jobs saved on this phone are still on the phone, untouched.</p>
+      <div class="btns"><button class="btn" data-use-phone>Keep data on this phone instead</button></div>`
+    : `<p class="hint" style="margin:0">Saved on this phone. If you run the JobLedger server on a computer or in the cloud, you can use it from here instead, which adds Fill from link. Start the server with <code>JL_TOKEN</code> set to a password and <code>JL_ORIGINS=${here}</code>, over https.</p>
+      <label class="f">Server address<input name="server" type="url" placeholder="https://your-computer.tail1234.ts.net" autocomplete="off" inputmode="url"></label>
+      <div class="btns"><button class="btn pri" type="submit">Use this server</button></div>`;
+  return `<form class="panel" data-where-form style="grid-column:1/-1"><h3>Where your data is kept</h3>${body}
+    ${S.error && S.whereError ? `<p class="err" role="alert">${esc(S.error)}</p>` : ''}
+    <span class="mute" style="font-size:12.5px">Switching does not copy jobs. To move them, download a backup on one side and restore it on the other.</span></form>`;
+}
 function dataView(): string {
   const theme = (() => { try { return localStorage.getItem('jobledger.theme') || 'system'; } catch { return 'system'; } })();
   const pr = S.pendingRestore;
-  return `<div class="two">
+  return `<div class="two">${BUILD === 'phone' ? wherePanel() : ''}
     <section class="panel"><h3>Your data</h3>
-      <p class="hint" style="margin:0">Everything lives in a SQLite file on the machine running the server. Nothing is sent anywhere.</p>
+      <p class="hint" style="margin:0">${MODE === 'server' ? (REMOTE ? `Everything lives on your JobLedger server at ${esc(REMOTE)}.` : 'Everything lives in a SQLite file on the machine running the server. Nothing is sent anywhere.')
+        : MODE === 'phone' ? 'Everything is saved on this device, in this browser. Nothing is sent anywhere. Download a backup now and then: it is your copy if the phone is lost or the browser data is cleared, and the JobLedger server on a computer can restore it too.'
+        : 'This is a preview with sample data. Changes stay on this page until you reload, and nothing is saved.'}</p>
       <div class="btns"><button class="btn" data-export-csv>Export CSV</button><button class="btn" data-backup>Download backup (JSON)</button></div>
       <h3>Follow-up reminders</h3>
       <p class="hint" style="margin:0">One calendar file with a 9:00 AM event and alert for every open job's follow-up (your date, or the day its idle nudge fires). Import it into Google Calendar on the web, Outlook or Apple Calendar so reminders reach you while JobLedger is closed. Importing again updates events in calendars that support it.</p>
@@ -307,7 +327,9 @@ function dataView(): string {
       <label class="f">Theme<select data-theme>${['system', 'light', 'dark'].map((t) => `<option value="${t}" ${t === theme ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
       ${getToken() ? '<div class="btns"><button class="btn" data-signout>Forget access token</button></div>' : ''}
       <h3>Install on your phone</h3>
-      <p class="hint" style="margin:0">When this page is opened over HTTPS, Chrome on Android offers Install app, which gives JobLedger its own icon. The easy way: install Tailscale on your computer and phone, then start JobLedger with <code>python -m jobledger --tailscale</code>. It prints a private https address only your own devices can open.</p>
+      <p class="hint" style="margin:0">${MODE === 'phone' ? 'In Chrome on Android, open the menu (three dots) and tap Install app. JobLedger then gets its own icon and works offline, with your data kept on the phone.'
+        : MODE === 'demo' ? 'The phone app is this same interface, saving your real data on the phone. Open the JobLedger app link from the README in Chrome on Android, then tap Install app in the menu.'
+        : 'When this page is opened over HTTPS, Chrome on Android offers Install app, which gives JobLedger its own icon. The easy way: install Tailscale on your computer and phone, then start JobLedger with <code>python -m jobledger --tailscale</code>. It prints a private https address only your own devices can open.'}</p>
     </section></div>`;
 }
 function gate(): string {
@@ -346,11 +368,11 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview],[data-use-phone]');
   if (!t) return;
   const d = t.dataset;
   if (d.view) {
-    S.view = d.view as View; S.form = null; S.error = '';
+    S.view = d.view as View; S.form = null; S.error = ''; S.whereError = false;
     if (S.view === 'job' && !S.detail && S.jobs.length) { await open((active()[0] ?? S.jobs[0]).id); return; }
     if (S.view === 'pulse') await guard(refresh);
   } else if (d.open) { await open(Number(d.open)); return; }
@@ -398,6 +420,7 @@ document.addEventListener('click', async (ev) => {
   }
   else if (d.keyRemove !== undefined) { setAiKey(''); S.rewrites = {}; toast('Key removed.'); }
   else if (d.exportCsv !== undefined) { await guard(() => api.download('/api/export.csv', 'jobledger.csv')); return; }
+  else if (d.usePhone !== undefined) { (window as unknown as { __JL_CONNECT__?: { useThisPhone: () => void } }).__JL_CONNECT__?.useThisPhone(); location.reload(); return; }
   else if (d.delInterview && S.sel !== null) { const j = await guard(() => api.delInterview(S.sel!, Number(d.delInterview))); if (j) { setDetail(j); toast('Interview removed.'); await reload(); } return; }
   else if (d.fillLink !== undefined) { await fillFromLink(t as HTMLButtonElement); return; }
   else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics?tz=${encodeURIComponent(userTimeZone())}`, `jobledger-follow-up-${S.sel}.ics`)); return; }
@@ -441,6 +464,19 @@ document.addEventListener('submit', async (ev) => {
     const j = await guard(() => api.addPrep(S.sel!, String(new FormData(f).get('text') || '')));
     if (j) setDetail(j);
     render(); return;
+  }
+  if (f.matches('[data-where-form]')) {
+    const c = (window as unknown as { __JL_CONNECT__?: { connectServer: (u: string) => Promise<void> } }).__JL_CONNECT__;
+    const btn = f.querySelector<HTMLButtonElement>('button[type=submit]');
+    if (!c || !btn) return;
+    btn.disabled = true; btn.textContent = 'Checking…';
+    try {
+      await c.connectServer(String(new FormData(f).get('server') || ''));
+      location.reload();
+    } catch (e) {
+      S.error = e instanceof Error ? e.message : String(e); S.whereError = true; render();
+    }
+    return;
   }
   if (f.matches('[data-key-form]')) {
     const k = String(new FormData(f).get('key') || '').trim();
@@ -571,9 +607,11 @@ document.addEventListener('drop', async (ev) => {
   if (S.jobs.find((j) => j.id === id)?.stage !== stage) await moveTo(id, stage); else render();
 });
 
+window.addEventListener('jobledger:save-failed', () => toast('This browser would not save your change. Check that it has storage space, then download a backup.'));
+
 /* ---------- start */
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
-  navigator.serviceWorker.register('/sw.js').catch(() => { /* optional */ });
+if (MODE !== 'demo' && 'serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('sw.js').catch(() => { /* optional */ });
 }
 (async () => {
   try { applyTheme(localStorage.getItem('jobledger.theme') || 'system'); } catch { /* ignore */ }

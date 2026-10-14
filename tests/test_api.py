@@ -223,5 +223,32 @@ class PostingAndInterviews(unittest.TestCase):
             s.stop()
 
 
+class PhoneAppOrigins(unittest.TestCase):
+    def test_listed_phone_app_can_connect_with_the_token(self):
+        app_site = "https://me.github.io"
+        s = Server(token="pw", origins=[app_site + "/"])
+        try:
+            h = {"Origin": app_site}
+            req = urllib.request.Request(s.base + "/api/jobs", method="OPTIONS",
+                                         headers={**h, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization, content-type"})
+            with urllib.request.urlopen(req) as r:
+                self.assertEqual(r.status, 204)
+                self.assertEqual(r.headers["Access-Control-Allow-Origin"], app_site)
+                self.assertIn("authorization", r.headers["Access-Control-Allow-Headers"])
+            st, _ = s.call("POST", "/api/jobs", {"company": "A", "title": "x"}, token="pw", headers={**h, "Sec-Fetch-Site": "cross-site"})
+            self.assertEqual(st, 201)
+            self.assertEqual(s.call("GET", "/api/jobs", headers=h)[0], 401)  # still needs the password
+            self.assertEqual(s.call("POST", "/api/jobs", {"company": "B", "title": "x"}, token="pw", headers={"Origin": "https://evil.example"})[0], 403)
+            req = urllib.request.Request(s.base + "/api/health", headers={"Origin": "https://evil.example"})
+            with urllib.request.urlopen(req) as r:
+                self.assertIsNone(r.headers["Access-Control-Allow-Origin"])  # other sites cannot read answers
+        finally:
+            s.stop()
+
+    def test_origins_need_a_token(self):
+        with self.assertRaisesRegex(ValueError, "JL_TOKEN"):
+            make_app(origins=["https://me.github.io"])
+
+
 if __name__ == "__main__":
     unittest.main()

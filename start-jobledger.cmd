@@ -3,6 +3,8 @@ rem Starts JobLedger and makes it reachable from your phone through Tailscale.
 rem Double-click to run, or put a shortcut to this file in your Startup folder (Win+R, shell:startup).
 rem Optional password: remove "rem " from the next line and change the value.
 rem set JL_TOKEN=change-me
+rem To use this server from the JobLedger phone app, also remove "rem " here (it needs the password above):
+rem set JL_ORIGINS=https://jasonzawacki-arch.github.io
 
 title JobLedger
 cd /d "%~dp0"
