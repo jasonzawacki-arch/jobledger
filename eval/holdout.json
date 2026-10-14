@@ -1,0 +1,18 @@
+[
+  {"name": "nurse-admin",
+   "resume": "- Scheduled appointments for a clinic seeing 80 patients a day using an electronic records system\n- Verified insurance coverage and resolved billing questions with patients\n- Trained three new front-desk staff on check-in procedures",
+   "posting": "Requirements:\n- Schedule patient appointments in an electronic records system\n- Verify insurance coverage\n- Train new front-desk staff\n- Medical coding certification",
+   "expect": {"Schedule patient appointments in an electronic records system": "match", "Verify insurance coverage": "match", "Train new front-desk staff": "match", "Medical coding certification": "gap"}},
+  {"name": "marketing",
+   "resume": "- Launched email campaigns to 40,000 subscribers and raised open rates from 18 to 27 percent\n- Wrote blog posts and landing-page copy that doubled monthly website visits\n- Reported campaign results to leadership each month",
+   "posting": "Requirements:\n- Run email marketing campaigns\n- Write website copy and blog content\n- Experience with Google Analytics\n- Manage a paid advertising budget",
+   "expect": {"Run email marketing campaigns": "match", "Write website copy and blog content": "match", "Experience with Google Analytics": "gap", "Manage a paid advertising budget": "gap"}},
+  {"name": "it-support",
+   "resume": "- Supported 250 employees by resolving hardware, software and network problems\n- Set up user accounts and permissions in Active Directory\n- Documented fixes in a shared knowledge base",
+   "posting": "Responsibilities:\n- Resolve hardware and software problems for employees\n- Manage user accounts in Active Directory\n- Experience with Linux server administration\n- Maintain a knowledge base",
+   "expect": {"Resolve hardware and software problems for employees": "match", "Manage user accounts in Active Directory": "match", "Experience with Linux server administration": "gap", "Maintain a knowledge base": "match"}},
+  {"name": "sales",
+   "resume": "- Closed $1.2 million in new business in 2023 selling software subscriptions to mid-size companies\n- Maintained a pipeline of 60 active leads in the company CRM\n- Gave product demos to buyers and technical staff",
+   "posting": "Requirements:\n- Experience selling software subscriptions\n- Manage a sales pipeline in a CRM\n- Deliver product demonstrations\n- Experience with enterprise accounts over 1,000 employees",
+   "expect": {"Experience selling software subscriptions": "match", "Manage a sales pipeline in a CRM": "match", "Deliver product demonstrations": "match", "Experience with enterprise accounts over 1,000 employees": "gap"}}
+]

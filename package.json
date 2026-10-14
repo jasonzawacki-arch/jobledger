@@ -1,0 +1,13 @@
+{
+  "name": "jobledger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first job application tracker.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node build.mjs",
+    "test": "python -m unittest discover -s tests -t ."
+  },
+  "devDependencies": { "typescript": "6.0.3" },
+  "license": "MIT"
+}
