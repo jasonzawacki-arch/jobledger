@@ -75,8 +75,7 @@ class GoogleDriveSync(unittest.TestCase):
     def device(self, client=True, exp=3600, base=None):
         ctx = self.browser.new_context(viewport={"width": 390, "height": 844})
         self.ctxs.append(ctx)
-        if client:
-            ctx.add_init_script(f"window.GSYNC_CLIENT_ID='test-client';window.__expIn={exp};")
+        ctx.add_init_script(f"window.GSYNC_CLIENT_ID='test-client';window.__expIn={exp};" if client else "window.GSYNC_CLIENT_ID='';")
         ctx.route("https://accounts.google.com/gsi/client", lambda r: r.fulfill(status=200, content_type="text/javascript", body=FAKE_GSI))
         ctx.route(re.compile(r"^https://www\.googleapis\.com/.*"), self.drive.route)
         ctx.route("**/api/**", lambda r: r.abort())  # never a JobLedger server
