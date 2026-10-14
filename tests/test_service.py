@@ -224,6 +224,106 @@ class Reminders(unittest.TestCase):
         self.assertIsNone(t.get_job(t.add_job({"company": "S", "title": "x"})["id"])["calendar_link"])
 
 
+class Interviews(unittest.TestCase):
+    def test_add_list_move_delete(self):
+        t, c = make()  # T0 is 2027-01-15 08:00 UTC
+        j = t.add_job({"company": "Acme", "title": "Analyst", "stage": 1})
+        g = t.add_interview(j["id"], {"starts_at": "2027-01-18T14:30", "minutes": 45, "label": "Phone screen", "place": "https://meet.example/x"})
+        iv = g["interviews"][0]
+        self.assertEqual((iv["starts_at"], iv["minutes"], iv["label"], iv["past"]), ("2027-01-18T14:30", 45, "Phone screen", False))
+        self.assertIn("dates=20270118T143000%2F20270118T151500", iv["calendar_link"])
+        self.assertIn("Phone screen scheduled for Mon Jan 18, 2:30 PM.", [e["text"] for e in g["events"]])
+        self.assertEqual(g["next_interview"], "2027-01-18T14:30")
+        self.assertEqual(t.list_jobs()[0]["next_interview"], "2027-01-18T14:30")
+        self.assertEqual([u["company"] for u in t.upcoming_interviews()], ["Acme"])
+        t.update_interview(j["id"], iv["id"], {"starts_at": "2027-01-19T09:00"})
+        self.assertEqual(t.get_job(j["id"])["interviews"][0]["starts_at"], "2027-01-19T09:00")
+        c.advance(5)  # Jan 20: it is over
+        self.assertTrue(t.get_job(j["id"])["interviews"][0]["past"])
+        self.assertIsNone(t.get_job(j["id"])["next_interview"])
+        self.assertEqual(t.upcoming_interviews(), [])
+        t.delete_interview(j["id"], iv["id"])
+        self.assertEqual(t.get_job(j["id"])["interviews"], [])
+        with self.assertRaises(NotFound): t.delete_interview(j["id"], iv["id"])
+
+    def test_validation(self):
+        t, _ = make()
+        j = t.add_job({"company": "A", "title": "x"})
+        for bad in ({}, {"starts_at": "tomorrow"}, {"starts_at": "2027-01-18T14:30+05:00"}, {"starts_at": "2027-01-18T14:30", "minutes": 0},
+                    {"starts_at": "2027-01-18T14:30", "minutes": True}, {"starts_at": "2027-01-18T14:30", "label": "x" * 121}, None):
+            with self.assertRaises(ValidationError, msg=bad): t.add_interview(j["id"], bad)
+        with self.assertRaises(NotFound): t.add_interview(99, {"starts_at": "2027-01-18T14:30"})
+
+    def test_upcoming_interview_pauses_the_nudge(self):
+        t, c = make()
+        j = t.add_job({"company": "A", "title": "x", "stage": 1})
+        t.add_interview(j["id"], {"starts_at": "2027-02-20T10:00"})
+        c.advance(20)  # idle well past 10 days, but the interview is still ahead
+        g = t.get_job(j["id"])
+        self.assertFalse(g["follow_up_due"]); self.assertIsNone(g["reminder_on"])
+        t.update_job(j["id"], {"follow_up_on": "2027-02-01"})  # a date you set still counts
+        self.assertTrue(t.get_job(j["id"])["follow_up_due"])
+
+    def test_interviews_in_calendar_backup_and_search(self):
+        t, _ = make()
+        j = t.add_job({"company": "A", "title": "x"})  # saved: no follow-up of its own
+        t.add_interview(j["id"], {"starts_at": "2027-01-18T14:30", "label": "Panel", "place": "Room 4, 1 Main St"})
+        one = t.calendar(j["id"]).replace("\r\n ", "")
+        self.assertIn("UID:jobledger-interview-1@jobledger.local", one)
+        self.assertIn("LOCATION:Room 4\\, 1 Main St", one)
+        self.assertIn("TRIGGER:-PT60M", one)
+        self.assertIn("jobledger-interview-1", t.calendar())
+        self.assertEqual(t.search("panel"), [j["id"]])
+        b = json.loads(json.dumps(t.backup()))
+        t.delete_interview(j["id"], 1)
+        t.restore(b)
+        self.assertEqual(t.get_job(j["id"])["interviews"][0]["label"], "Panel")
+        bad = json.loads(json.dumps(b)); bad["interviews"][0]["starts_at"] = "nope"
+        with self.assertRaises(ValidationError): t.restore(bad)
+
+
+class Source(unittest.TestCase):
+    def test_source_field_export_import_and_old_backups(self):
+        t, _ = make()
+        j = t.add_job({"company": "A", "title": "x", "source": "Referral"})
+        self.assertEqual(j["source"], "Referral")
+        self.assertEqual(t.update_job(j["id"], {"source": "LinkedIn"})["source"], "LinkedIn")
+        with self.assertRaises(ValidationError): t.update_job(j["id"], {"source": "x" * 81})
+        out = t.export_csv()
+        self.assertIn("source", out.splitlines()[0])
+        t2, _ = make(); t2.import_csv(out)
+        self.assertEqual(t2.list_jobs()[0]["source"], "LinkedIn")
+        old = json.loads(json.dumps(t.backup()))
+        for jj in old["jobs"]: del jj["source"]
+        del old["interviews"]
+        t.restore(old)  # backups from before sources and interviews still restore
+        self.assertEqual(t.list_jobs()[0]["source"], "")
+
+
+class Pulse(unittest.TestCase):
+    def test_response_rate_reply_time_weeks_and_sources(self):
+        t, c = make()  # Friday 2027-01-15
+        a = t.add_job({"company": "A", "title": "x", "stage": 1, "source": "LinkedIn"})
+        b = t.add_job({"company": "B", "title": "y", "source": "Referral"})  # saved first
+        d = t.add_job({"company": "D", "title": "z", "stage": 1, "source": "LinkedIn"})
+        t.add_job({"company": "S", "title": "never applied"})
+        c.advance(3); t.move(a["id"], 2)  # heard back after 3 days
+        c.advance(1); t.move(b["id"], 1)  # applied on day 4
+        c.advance(5); t.close(b["id"], "rejected")  # heard back (a no) after 5 days
+        t.close(d["id"], "ghosted")  # silence is not a reply
+        p = t.pulse()
+        self.assertEqual((p["applied_total"], p["heard_back"], p["response_rate_pct"], p["median_days_to_reply"]), (3, 2, 67, 4))
+        self.assertEqual(len(p["weekly_applied"]), 8)
+        self.assertEqual([w["applied"] for w in p["weekly_applied"]][-2:], [2, 1])  # week of Jan 11: A, D; week of Jan 18: B
+        self.assertEqual(p["weekly_applied"][-1]["week_of"], "2027-01-18")
+        self.assertEqual(p["by_source"], [{"source": "LinkedIn", "applied": 2, "heard_back": 1}, {"source": "Referral", "applied": 1, "heard_back": 1}])
+
+    def test_empty(self):
+        t, _ = make()
+        p = t.pulse()
+        self.assertEqual((p["applied_total"], p["response_rate_pct"], p["median_days_to_reply"], p["by_source"]), (0, None, None, []))
+
+
 if __name__ == "__main__":
     unittest.main()
 

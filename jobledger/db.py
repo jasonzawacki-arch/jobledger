@@ -61,6 +61,30 @@ SCHEMA = [
     );
     CREATE INDEX prep_job ON prep_items (job_id, position);
     """,
+    # version 4: where a job came from, and scheduled interviews (local wall-clock time, "YYYY-MM-DDTHH:MM")
+    """
+    ALTER TABLE jobs ADD COLUMN source TEXT NOT NULL DEFAULT '';
+    CREATE TABLE interviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        starts_at TEXT NOT NULL,
+        minutes INTEGER NOT NULL DEFAULT 60 CHECK (minutes BETWEEN 5 AND 600),
+        label TEXT NOT NULL DEFAULT '',
+        place TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX interviews_job ON interviews (job_id, starts_at);
+    CREATE TABLE events_v4 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        at REAL NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('created', 'stage', 'note', 'closed', 'reopened', 'follow_up', 'interview')),
+        text TEXT NOT NULL
+    );
+    INSERT INTO events_v4 (id, job_id, at, kind, text) SELECT id, job_id, at, kind, text FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_v4 RENAME TO events;
+    CREATE INDEX events_job ON events (job_id, at);
+    """,
 ]
 
 

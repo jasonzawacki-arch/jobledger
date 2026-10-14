@@ -27,8 +27,10 @@ DEFAULT_PREP = [
     "Plan how you will say you are returning to work after a break",
 ]
 STALE_DAYS = 10  # a job in progress with no activity for this long needs a nudge
-FIELD_LIMITS = {"company": 120, "title": 160, "location": 120, "pay": 80, "url": 500, "posted_on": 10, "description": 60000}
-EDITABLE = ("company", "title", "location", "pay", "url", "posted_on", "description")
+FIELD_LIMITS = {"company": 120, "title": 160, "location": 120, "pay": 80, "url": 500, "posted_on": 10, "description": 60000, "source": 80}
+EDITABLE = ("company", "title", "location", "pay", "url", "posted_on", "description", "source")
+SOURCES = ("LinkedIn", "Indeed", "Company site", "Referral", "Recruiter", "Job board", "Other")  # suggestions; any text is allowed
+STAGE_MOVE = re.compile(r"^Moved from (\w+) to (\w+)\.$")
 
 
 class ValidationError(ValueError):
@@ -90,7 +92,10 @@ class Tracker:
         closed = r["closed_reason"] is not None
         idle_days = int((now - last_at) // DAY)
         due, remind = False, None
-        if not closed and r["stage"] != 4:
+        nxt = self._next_interview(r["id"]) if not closed else None
+        if nxt and not r["follow_up_on"]:
+            pass  # an interview is coming up, so there is nothing to chase
+        elif not closed and r["stage"] != 4:
             if r["follow_up_on"]:
                 remind = r["follow_up_on"]
                 due = dt.date.fromisoformat(r["follow_up_on"]) <= self._today()
@@ -100,10 +105,10 @@ class Tracker:
                 remind = dt.datetime.fromtimestamp(last_at + self.stale_days * DAY, self.tz).date().isoformat()
         return {
             "id": r["id"], "company": r["company"], "title": r["title"], "location": r["location"], "pay": r["pay"],
-            "url": r["url"], "posted_on": r["posted_on"], "description": r["description"],
+            "url": r["url"], "posted_on": r["posted_on"], "description": r["description"], "source": r["source"],
             "stage": r["stage"], "stage_name": STAGES[r["stage"]], "max_stage": r["max_stage"],
             "closed_reason": r["closed_reason"], "follow_up_on": r["follow_up_on"],
-            "reminder_on": remind, "reminder_is_nudge": bool(remind) and not r["follow_up_on"],
+            "reminder_on": remind, "reminder_is_nudge": bool(remind) and not r["follow_up_on"], "next_interview": nxt,
             "days_in_stage": int((now - r["stage_changed_at"]) // DAY), "idle_days": idle_days, "follow_up_due": due,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         }
@@ -124,8 +129,8 @@ class Tracker:
             c.execute("BEGIN")
             try:
                 cur = c.execute(
-                    "INSERT INTO jobs (company, title, location, pay, url, posted_on, description, stage, max_stage, follow_up_on, stage_changed_at, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    f"INSERT INTO jobs ({', '.join(EDITABLE)}, stage, max_stage, follow_up_on, stage_changed_at, created_at, updated_at)"
+                    f" VALUES ({', '.join('?' * (len(EDITABLE) + 6))})",
                     (*[vals[f] for f in EDITABLE], stage, stage, follow, now, now, now),
                 )
                 jid = cur.lastrowid
@@ -153,18 +158,129 @@ class Tracker:
             out["contacts"] = [dict(r) for r in self.db.conn.execute("SELECT id, name, role, email, last_contacted_on FROM contacts WHERE job_id = ? ORDER BY id", (job_id,))]
             out["prep"] = [dict(r) | {"done": bool(r["done"])} for r in self.db.conn.execute("SELECT id, text, done FROM prep_items WHERE job_id = ? ORDER BY position, id", (job_id,))]
             out["calendar_link"] = reminders.google_link(out)
+            out["interviews"] = [self._interview_view(dict(r), out) for r in self.db.conn.execute(
+                "SELECT id, starts_at, minutes, label, place FROM interviews WHERE job_id = ? ORDER BY starts_at, id", (job_id,))]
             return out
 
     def calendar(self, job_id: Optional[int] = None) -> str:
         """An .ics file with the follow-up reminder for one job, or for every open job that has one."""
         with self.db.lock:
             if job_id is not None:
-                jobs = [self.get_job(job_id)]
-                if not jobs[0]["reminder_on"]:
-                    raise ValidationError("This job has no follow-up to remind you about")
+                job = self.get_job(job_id)
+                interviews = [i for i in self.upcoming_interviews(days=3650) if i["job_id"] == job_id]
+                jobs = [job] if job["reminder_on"] else []
+                if not jobs and not interviews:
+                    raise ValidationError("This job has no follow-up or upcoming interview to remind you about")
             else:
                 jobs = [self.get_job(j["id"]) for j in self.list_jobs() if j["reminder_on"]]
-        return reminders.ics(jobs, self.clock())
+                interviews = self.upcoming_interviews(days=3650)
+        return reminders.ics(jobs, self.clock(), interviews)
+
+    # ---- interviews
+    def _next_interview(self, job_id: int) -> Optional[str]:
+        """Start of the job's next interview that has not ended yet, as local "YYYY-MM-DDTHH:MM"."""
+        now = self._now_local()
+        for r in self.db.conn.execute("SELECT starts_at, minutes FROM interviews WHERE job_id = ? AND starts_at >= ? ORDER BY starts_at",
+                                      (job_id, (now - dt.timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M"))):
+            if dt.datetime.fromisoformat(r["starts_at"]) + dt.timedelta(minutes=r["minutes"]) >= now:
+                return r["starts_at"]
+        return None
+
+    def _now_local(self) -> dt.datetime:
+        return dt.datetime.fromtimestamp(self.clock(), self.tz).replace(tzinfo=None)
+
+    @staticmethod
+    def _interview_fields(d, partial: bool = False) -> dict:
+        if not isinstance(d, dict):
+            raise ValidationError("Expected an object")
+        out = {}
+        if "starts_at" in d or not partial:
+            v = d.get("starts_at")
+            if not isinstance(v, str):
+                raise ValidationError("Give the interview a date and time")
+            try:
+                when = dt.datetime.fromisoformat(v.strip())
+            except ValueError:
+                raise ValidationError("starts_at must be a date and time like 2026-10-24T14:30") from None
+            if when.tzinfo is not None or not 2000 <= when.year <= 2100:
+                raise ValidationError("starts_at must be a local date and time like 2026-10-24T14:30")
+            out["starts_at"] = when.strftime("%Y-%m-%dT%H:%M")
+        if "minutes" in d:
+            m = d["minutes"]
+            if isinstance(m, bool) or not isinstance(m, int) or not 5 <= m <= 600:
+                raise ValidationError("minutes must be a whole number from 5 to 600")
+            out["minutes"] = m
+        for k, limit in (("label", 120), ("place", 300)):
+            if k in d:
+                v = d[k] if d[k] is not None else ""
+                if not isinstance(v, str):
+                    raise ValidationError(f"{k} must be text")
+                if len(v.strip()) > limit:
+                    raise ValidationError(f"{k} is too long (limit {limit} characters)")
+                out[k] = v.strip()
+        return out
+
+    def _interview_view(self, r: dict, job: dict) -> dict:
+        r["past"] = dt.datetime.fromisoformat(r["starts_at"]) + dt.timedelta(minutes=r["minutes"]) < self._now_local()
+        r["calendar_link"] = reminders.interview_link(r, job)
+        return r
+
+    @staticmethod
+    def _when(starts_at: str) -> str:
+        t = dt.datetime.fromisoformat(starts_at)
+        return f"{t:%a %b} {t.day}, {t:%I:%M %p}".replace(" 0", " ")
+
+    def add_interview(self, job_id: int, d) -> dict:
+        f = self._interview_fields(d)
+        with self.db.lock:
+            self._row(job_id)
+            self.db.conn.execute("INSERT INTO interviews (job_id, starts_at, minutes, label, place) VALUES (?, ?, ?, ?, ?)",
+                                 (job_id, f["starts_at"], f.get("minutes", 60), f.get("label", ""), f.get("place", "")))
+            what = f.get("label") or "Interview"
+            self._event(job_id, "interview", f"{what} scheduled for {self._when(f['starts_at'])}.")
+            self._touch(job_id)
+            return self.get_job(job_id)
+
+    def update_interview(self, job_id: int, interview_id: int, d) -> dict:
+        f = self._interview_fields(d, partial=True)
+        with self.db.lock:
+            if not self.db.conn.execute("SELECT 1 FROM interviews WHERE id = ? AND job_id = ?", (interview_id, job_id)).fetchone():
+                raise NotFound("No such interview")
+            for k, v in f.items():
+                self.db.conn.execute(f"UPDATE interviews SET {k} = ? WHERE id = ?", (v, interview_id))
+            if "starts_at" in f:
+                self._event(job_id, "interview", f"Interview moved to {self._when(f['starts_at'])}.")
+            self._touch(job_id)
+            return self.get_job(job_id)
+
+    def delete_interview(self, job_id: int, interview_id: int) -> dict:
+        with self.db.lock:
+            r = self.db.conn.execute("SELECT starts_at, label FROM interviews WHERE id = ? AND job_id = ?", (interview_id, job_id)).fetchone()
+            if not r:
+                raise NotFound("No such interview")
+            self.db.conn.execute("DELETE FROM interviews WHERE id = ?", (interview_id,))
+            self._event(job_id, "interview", f"{r['label'] or 'Interview'} on {self._when(r['starts_at'])} removed.")
+            self._touch(job_id)
+            return self.get_job(job_id)
+
+    def upcoming_interviews(self, days: int = 14) -> list[dict]:
+        """Interviews for open jobs that have not ended yet and start within the next `days` days, soonest first."""
+        now = self._now_local()
+        until = (now + dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M")
+        with self.db.lock:
+            rows = self.db.conn.execute(
+                "SELECT i.id, i.job_id, i.starts_at, i.minutes, i.label, i.place, j.company, j.title, j.url, j.stage"
+                " FROM interviews i JOIN jobs j ON j.id = i.job_id WHERE j.closed_reason IS NULL AND i.starts_at <= ?"
+                " ORDER BY i.starts_at, i.id", (until,)).fetchall()
+        out = []
+        for r in rows:
+            r = dict(r)
+            if dt.datetime.fromisoformat(r["starts_at"]) + dt.timedelta(minutes=r["minutes"]) < now:
+                continue
+            job = {"company": r["company"], "title": r["title"], "url": r["url"], "contacts": []}
+            r["calendar_link"] = reminders.interview_link(r, job)
+            out.append(r)
+        return out
 
     def list_jobs(self, include_closed: bool = False) -> list[dict]:
         with self.db.lock:
@@ -188,6 +304,7 @@ class Tracker:
                 "SELECT j.id, j.company || ' ' || j.title || ' ' || j.location || ' ' || j.pay || ' ' || j.description"
                 " || ' ' || COALESCE((SELECT group_concat(text, ' ') FROM events e WHERE e.job_id = j.id AND e.kind = 'note'), '')"
                 " || ' ' || COALESCE((SELECT group_concat(name || ' ' || role || ' ' || email, ' ') FROM contacts c WHERE c.job_id = j.id), '')"
+                " || ' ' || j.source || ' ' || COALESCE((SELECT group_concat(label || ' ' || place, ' ') FROM interviews i WHERE i.job_id = j.id), '')"
                 " AS hay FROM jobs j ORDER BY j.id"
             ).fetchall()
         return [r["id"] for r in rows if all(w in r["hay"].casefold() for w in words)]
@@ -284,6 +401,71 @@ class Tracker:
             "in_flight": len(in_flight),
             "follow_ups_due": [{"id": j["id"], "company": j["company"], "title": j["title"], "stage_name": j["stage_name"], "days_in_stage": j["days_in_stage"], "idle_days": j["idle_days"], "follow_up_on": j["follow_up_on"]} for j in due],
             "stale_days": self.stale_days,
+            **self._response_stats(jobs),
+            "upcoming_interviews": self.upcoming_interviews(),
+        }
+
+    def _response_stats(self, jobs: list[dict]) -> dict:
+        """When each job was applied to and when it first heard back, worked out from its history.
+
+        Applied: the job was created at Applied, or first moved to Applied or beyond.
+        Heard back: after applying, it first moved to Screen or beyond, or was closed as rejected.
+        """
+        idx = {n: i for i, n in enumerate(STAGES)}
+        with self.db.lock:
+            evs = self.db.conn.execute("SELECT job_id, at, kind, text FROM events ORDER BY at, id").fetchall()
+        applied, heard = {}, {}
+        for e in evs:
+            j = e["job_id"]
+            if j not in applied:
+                if e["kind"] == "created" and e["text"] == "Applied.":
+                    applied[j] = e["at"]
+                elif e["kind"] == "stage":
+                    m = STAGE_MOVE.match(e["text"])
+                    if m and idx.get(m.group(2), 0) >= 1:
+                        applied[j] = e["at"]
+                        if idx.get(m.group(2), 0) >= 2:  # moved straight from Saved to Screen or later
+                            heard[j] = e["at"]
+                continue
+            if j in heard:
+                continue
+            if e["kind"] == "stage":
+                m = STAGE_MOVE.match(e["text"])
+                if m and idx.get(m.group(2), 0) >= 2:
+                    heard[j] = e["at"]
+            elif e["kind"] == "closed" and e["text"] == "Rejected.":
+                heard[j] = e["at"]
+        by_id = {j["id"]: j for j in jobs}
+        applied = {j: t for j, t in applied.items() if j in by_id}
+        waits = sorted((heard[j] - applied[j]) / DAY for j in applied if j in heard)
+        median = None
+        if waits:
+            mid = len(waits) // 2
+            median = round(waits[mid] if len(waits) % 2 else (waits[mid - 1] + waits[mid]) / 2)
+
+        # applications per week for the last 8 weeks, weeks starting on Monday in the user's time zone
+        today = self._today()
+        start = today - dt.timedelta(days=today.weekday() + 7 * 7)
+        weeks = [{"week_of": (start + dt.timedelta(weeks=i)).isoformat(), "applied": 0} for i in range(8)]
+        for t in applied.values():
+            d = dt.datetime.fromtimestamp(t, self.tz).date()
+            i = (d - start).days // 7
+            if 0 <= i < 8:
+                weeks[i]["applied"] += 1
+
+        sources: dict[str, dict] = {}
+        for j, t in applied.items():
+            src = by_id[j]["source"] or "Not set"
+            row = sources.setdefault(src, {"source": src, "applied": 0, "heard_back": 0})
+            row["applied"] += 1
+            row["heard_back"] += j in heard
+        return {
+            "applied_total": len(applied),
+            "heard_back": sum(1 for j in applied if j in heard),
+            "response_rate_pct": round(sum(1 for j in applied if j in heard) / len(applied) * 100) if applied else None,
+            "median_days_to_reply": median,
+            "weekly_applied": weeks,
+            "by_source": sorted(sources.values(), key=lambda r: (-r["applied"], r["source"] == "Not set", r["source"])),
         }
 
     # ---- contacts
@@ -446,9 +628,9 @@ class Tracker:
     def export_csv(self) -> str:
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["company", "title", "location", "pay", "url", "posted_on", "stage", "furthest_stage", "status", "follow_up_on", "days_in_stage", "created_utc"])
+        w.writerow(["company", "title", "location", "pay", "url", "posted_on", "source", "stage", "furthest_stage", "status", "follow_up_on", "days_in_stage", "created_utc"])
         for j in self.list_jobs(include_closed=True):
-            w.writerow([_csv_safe(j["company"]), _csv_safe(j["title"]), _csv_safe(j["location"]), _csv_safe(j["pay"]), _csv_safe(j["url"]), j["posted_on"], j["stage_name"], STAGES[j["max_stage"]],
+            w.writerow([_csv_safe(j["company"]), _csv_safe(j["title"]), _csv_safe(j["location"]), _csv_safe(j["pay"]), _csv_safe(j["url"]), j["posted_on"], _csv_safe(j["source"]), j["stage_name"], STAGES[j["max_stage"]],
                         j["closed_reason"] or "active", j["follow_up_on"] or "", j["days_in_stage"], dt.datetime.fromtimestamp(j["created_at"], dt.timezone.utc).strftime("%Y-%m-%d %H:%M")])
         return buf.getvalue()
 
@@ -458,7 +640,9 @@ class Tracker:
             events = [dict(r) for r in self.db.conn.execute("SELECT * FROM events ORDER BY id")]
             contacts = [dict(r) for r in self.db.conn.execute("SELECT * FROM contacts ORDER BY id")]
             prep = [dict(r) for r in self.db.conn.execute("SELECT * FROM prep_items ORDER BY id")]
-        return {"app": "jobledger", "version": 1, "exported_at": self.clock(), "jobs": jobs, "events": events, "resume": self.get_resume()["text"], "contacts": contacts, "prep": prep}
+            interviews = [dict(r) for r in self.db.conn.execute("SELECT * FROM interviews ORDER BY id")]
+        return {"app": "jobledger", "version": 1, "exported_at": self.clock(), "jobs": jobs, "events": events, "resume": self.get_resume()["text"],
+                "contacts": contacts, "prep": prep, "interviews": interviews}
 
     def restore(self, data) -> dict:
         """Replaces everything with a backup. Validated first, applied in one transaction."""
@@ -473,11 +657,16 @@ class Tracker:
         contacts, prep = data.get("contacts", []), data.get("prep", [])
         if not isinstance(contacts, list) or not isinstance(prep, list) or len(contacts) > 20000 or len(prep) > 50000:
             raise ValidationError("The contacts or checklists in the backup are invalid")
+        interviews = data.get("interviews", [])  # older backups have none
+        if not isinstance(interviews, list) or len(interviews) > 20000:
+            raise ValidationError("The interviews in the backup are invalid")
         if len(jobs) > 5000 or len(events) > 100000:
             raise ValidationError("The backup is too large")
-        cols = ["id", "company", "title", "location", "pay", "url", "posted_on", "description", "stage", "max_stage", "closed_reason", "follow_up_on", "stage_changed_at", "created_at", "updated_at"]
+        cols = ["id", "company", "title", "location", "pay", "url", "posted_on", "description", "stage", "max_stage", "closed_reason", "follow_up_on", "stage_changed_at", "created_at", "updated_at", "source"]
         ids = set()
         for j in jobs:
+            if isinstance(j, dict):
+                j.setdefault("source", "")  # older backups have no source
             if not isinstance(j, dict) or set(cols) - set(j):
                 raise ValidationError("A job in the backup is incomplete")
             if not isinstance(j["id"], int) or j["id"] in ids:
@@ -494,13 +683,17 @@ class Tracker:
                 if not isinstance(j[f], (int, float)):
                     raise ValidationError("A job in the backup has an invalid date")
         for e in events:
-            if not isinstance(e, dict) or e.get("job_id") not in ids or e.get("kind") not in ("created", "stage", "note", "closed", "reopened", "follow_up") \
+            if not isinstance(e, dict) or e.get("job_id") not in ids or e.get("kind") not in ("created", "stage", "note", "closed", "reopened", "follow_up", "interview") \
                     or not isinstance(e.get("text"), str) or not isinstance(e.get("at"), (int, float)):
                 raise ValidationError("An event in the backup is invalid")
         for ct in contacts:
             if not isinstance(ct, dict) or ct.get("job_id") not in ids:
                 raise ValidationError("A contact in the backup is invalid")
             self._contact_fields({k: ct.get(k, "") for k in ("name", "role", "email", "last_contacted_on")})
+        for iv in interviews:
+            if not isinstance(iv, dict) or iv.get("job_id") not in ids:
+                raise ValidationError("An interview in the backup is invalid")
+            iv.update(self._interview_fields({k: iv.get(k) for k in ("starts_at", "minutes", "label", "place") if k in iv}))
         for it in prep:
             if not isinstance(it, dict) or it.get("job_id") not in ids or not isinstance(it.get("text"), str) or it.get("done") not in (0, 1, True, False):
                 raise ValidationError("A checklist item in the backup is invalid")
@@ -510,6 +703,7 @@ class Tracker:
             try:
                 c.execute("DELETE FROM contacts")
                 c.execute("DELETE FROM prep_items")
+                c.execute("DELETE FROM interviews")
                 c.execute("DELETE FROM events")
                 c.execute("DELETE FROM jobs")
                 c.execute("DELETE FROM resume")
@@ -522,6 +716,9 @@ class Tracker:
                 for ct in contacts:
                     c.execute("INSERT INTO contacts (job_id, name, role, email, last_contacted_on) VALUES (?, ?, ?, ?, ?)",
                               (ct["job_id"], ct["name"].strip(), ct.get("role", ""), ct.get("email", ""), ct.get("last_contacted_on", "")))
+                for iv in interviews:
+                    c.execute("INSERT INTO interviews (job_id, starts_at, minutes, label, place) VALUES (?, ?, ?, ?, ?)",
+                              (iv["job_id"], iv["starts_at"], iv.get("minutes", 60), iv.get("label", ""), iv.get("place", "")))
                 for n, it in enumerate(prep):
                     c.execute("INSERT INTO prep_items (job_id, text, done, position) VALUES (?, ?, ?, ?)", (it["job_id"], it["text"][:200], int(bool(it["done"])), it.get("position", n)))
                 c.execute("COMMIT")

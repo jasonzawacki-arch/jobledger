@@ -207,3 +207,18 @@ textarea { resize: vertical; min-height: 84px; }
 .remind { display: flex; flex-direction: column; gap: 8px; }
 a.btn { text-decoration: none; }
 a.btn:not(.job-link) { color: var(--ink); } a.btn { display: inline-flex; align-items: center; }
+.inline { display: flex; gap: 8px; align-items: stretch; }
+.inline input { flex: 1; }
+.inline .btn { white-space: nowrap; }
+.fu.past { opacity: 0.6; }
+.weeks { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; align-items: end; height: 150px; padding-top: 4px; }
+.wk { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 4px; min-width: 0; }
+.wk span { width: 100%; max-width: 34px; min-height: 2px; background: var(--accent); border-radius: 6px 6px 2px 2px; opacity: 0.85; }
+.wk b { font-size: 12px; }
+.wk small { font-size: 10.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.srct { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.srct th { text-align: left; font-weight: 600; color: var(--mute); font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.srct td { padding: 6px; border-bottom: 1px solid var(--line); }
+.srct .num { text-align: right; font-variant-numeric: tabular-nums; }
+.pill.good { background: var(--good-soft, var(--accent-soft)); color: var(--good); }
+.fu .btns a.btn { white-space: nowrap; }

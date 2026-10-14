@@ -36,6 +36,13 @@ def load_demo(tracker) -> None:
             d = dt.datetime.fromtimestamp(now + follow * DAY, tracker.tz).date().isoformat()
             tracker.update_job(j["id"], {"follow_up_on": d})
     tracker.clock = real
+    srcs = ["LinkedIn", "Referral", "Company site", "LinkedIn", "Indeed", "Recruiter"]
+    for i, j in enumerate(tracker.list_jobs(include_closed=True)):
+        tracker.update_job(j["id"], {"source": srcs[i % len(srcs)]})
+        if j["stage"] == 3 and not j["closed_reason"]:
+            day = dt.datetime.fromtimestamp(now + 3 * DAY, tracker.tz).date()
+            tracker.add_interview(j["id"], {"starts_at": f"{day.isoformat()}T10:00", "minutes": 60, "label": "Final round with the hiring manager",
+                                            "place": "https://meet.example.com/demo"})
     if not tracker.get_resume()["text"]:
         tracker.set_resume(DEMO_RESUME)
 

@@ -215,6 +215,53 @@ class UI(unittest.TestCase):
         self.assertIn("DTSTART:20310304T090000", Path(dl.value.path()).read_text())
         self.assertEqual(self.errors, [])
 
+    def test_fill_from_link_keeps_typed_fields(self):
+        self.s.stop()
+        self.s = Server(read_posting=lambda url: {"source": "posting", "fields": {
+            "company": "Initech", "title": "Data Analyst", "location": "Arlington, VA", "pay": "$85k-100k/yr",
+            "posted_on": "2026-10-01", "description": "- Strong SQL\n- Tableau", "url": url}})
+        pg = self.page()
+        pg.click("[data-add]")
+        pg.fill("input[name=title]", "My own title")
+        pg.fill("input[name=url]", "https://jobs.example/1")
+        pg.click("[data-fill-link]")
+        pg.wait_for_function("document.querySelector('input[name=company]').value === 'Initech'")
+        self.assertEqual(pg.input_value("input[name=title]"), "My own title")  # typed text is never overwritten
+        self.assertEqual(pg.input_value("input[name=pay]"), "$85k-100k/yr")
+        self.assertEqual(pg.input_value("input[name=posted_on]"), "2026-10-01")
+        self.assertIn("Tableau", pg.input_value("textarea[name=description]"))
+        self.assertIn("kept what you typed for title", pg.inner_text("#toast"))
+        pg.fill("input[name=source]", "Referral")
+        pg.click("form[data-form=add] button[type=submit]")
+        pg.wait_for_selector(".hero >> text=via Referral")
+        self.assertEqual(self.errors, [])
+
+    def test_interviews_and_pulse(self):
+        pg = self.page()
+        self.add(pg, "Initech", "Analyst")
+        pg.click(".card >> text=Initech")
+        pg.fill("[data-interview-form] input[name=starts_at]", "2031-05-06T14:30")
+        pg.select_option("[data-interview-form] select[name=minutes]", "45")
+        pg.fill("[data-interview-form] input[name=label]", "Phone screen with Dana")
+        pg.fill("[data-interview-form] input[name=place]", "https://meet.example/abc")
+        pg.click("[data-interview-form] button[type=submit]")
+        pg.wait_for_selector("text=Phone screen with Dana")
+        panel = pg.inner_text("section:has(h3:text('Interviews'))")
+        self.assertIn("45 min", panel)
+        self.assertIn("2:30", panel)
+        self.assertIn("dates=20310506T143000", pg.get_attribute("section:has(h3:text('Interviews')) a.btn", "href"))
+        self.assertIn("scheduled for", pg.inner_text(".tl"))
+        pg.click("[data-go=board]")
+        self.assertIn("2:30", pg.inner_text(".card:has-text('Initech') .pill"))  # card shows the next interview
+        pg.click("[data-view=pulse]")
+        pg.wait_for_selector("text=Applications per week")
+        self.assertEqual(pg.locator(".weeks .wk").count(), 8)
+        self.assertIn("Not set", pg.inner_text(".srct"))
+        pg.click("[data-view=board]"); pg.click(".card >> text=Initech")
+        pg.click("[data-del-interview]")
+        pg.wait_for_selector("text=No interviews scheduled yet.")
+        self.assertEqual(self.errors, [])
+
     def test_drag_and_drop(self):
         pg = self.page()
         self.add(pg, "Dragco", "Analyst")

@@ -1,0 +1,22 @@
+[
+  {"name": "warehouse-lead",
+   "resume": "- Supervised a shift of 12 associates picking and packing 3,000 orders a day\n- Ran cycle counts and kept inventory accuracy above 99 percent in the WMS\n- Trained new hires on forklift safety and OSHA procedures\n- Cut mis-picks by 30 percent by relabeling bin locations",
+   "posting": "Requirements:\n- Supervise warehouse associates on a busy shift\n- Maintain inventory accuracy with cycle counts\n- Forklift certification\n- Experience with SAP\n- Bilingual in English and Spanish",
+   "expect": {"Supervise warehouse associates on a busy shift": "match", "Maintain inventory accuracy with cycle counts": "match", "Forklift certification": "partial", "Experience with SAP": "gap", "Bilingual in English and Spanish": "gap"}},
+  {"name": "devops-engineer",
+   "resume": "- Automated AWS infrastructure with Terraform modules for three environments\n- Built Jenkins pipelines that deploy Docker containers on every merge\n- Set up CloudWatch alarms and on-call runbooks that cut outage time in half\n- Migrated build servers from CentOS to Amazon Linux",
+   "posting": "Requirements:\n- Infrastructure as code with Terraform\n- CI/CD pipelines for containerized services\n- Monitoring and alerting for production systems\n- Experience with Kubernetes\n- Azure certification",
+   "expect": {"Infrastructure as code with Terraform": "match", "CI/CD pipelines for containerized services": "match", "Monitoring and alerting for production systems": "partial", "Experience with Kubernetes": "gap", "Azure certification": "gap"}},
+  {"name": "teacher-to-trainer",
+   "resume": "- Designed and taught a ninth-grade biology curriculum for 150 students a year\n- Created lesson plans, quizzes and lab activities aligned to state standards\n- Mentored two first-year teachers through their first semester\n- Used Google Classroom to track assignments and grades",
+   "posting": "Requirements:\n- Design training curriculum for adult learners\n- Create lesson plans and assessments\n- Mentor new trainers\n- Experience with an LMS such as Cornerstone\n- Instructional design certification",
+   "expect": {"Design training curriculum for adult learners": "partial", "Create lesson plans and assessments": "match", "Mentor new trainers": "partial", "Experience with an LMS such as Cornerstone": "gap", "Instructional design certification": "gap"}},
+  {"name": "project-manager",
+   "resume": "- Managed a $3M federal contract portfolio with 15 to 20 engineers\n- Ran sprint planning, backlog grooming and stakeholder reviews as Scrum Master\n- Wrote technical volumes for proposals that won follow-on awards\n- Tracked risks and milestones in Jira and reported status to executives",
+   "posting": "Requirements:\n- Manage contract budgets and delivery for federal programs\n- Agile or Scrum experience\n- Write proposal technical volumes\n- PMP certification\n- Active Secret clearance",
+   "expect": {"Manage contract budgets and delivery for federal programs": "partial", "Agile or Scrum experience": "match", "Write proposal technical volumes": "match", "PMP certification": "gap", "Active Secret clearance": "gap"}},
+  {"name": "support-specialist",
+   "resume": "- Answered 60 customer tickets a day in Zendesk with a 95 percent satisfaction score\n- Wrote help-center articles that reduced repeat questions\n- Escalated product bugs to engineering with clear reproduction steps",
+   "posting": "Requirements:\n- Resolve customer support tickets\n- Write knowledge base articles\n- Escalate bugs to engineering\n- Experience with Salesforce Service Cloud\n- Phone support experience",
+   "expect": {"Resolve customer support tickets": "match", "Write knowledge base articles": "partial", "Escalate bugs to engineering": "match", "Experience with Salesforce Service Cloud": "gap", "Phone support experience": "gap"}}
+]

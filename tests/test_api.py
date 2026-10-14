@@ -188,5 +188,40 @@ class SearchAndCalendar(unittest.TestCase):
         self.assertIn(b"Initech", raw); self.assertNotIn(b"Hooli", raw)
 
 
+class PostingAndInterviews(unittest.TestCase):
+    def test_posting_endpoint_and_interviews(self):
+        from jobledger import posting
+        def fake(url):
+            if "bad" in url:
+                raise posting.PostingError("Could not load that page")
+            return {"source": "posting", "fields": {"company": "Initech", "title": "Analyst", "url": url}}
+        s = Server(read_posting=fake)
+        try:
+            st, r = j(s.call("POST", "/api/posting", {"url": "https://jobs.example/1"}))
+            self.assertEqual((st, r["fields"]["company"]), (200, "Initech"))
+            st, r = j(s.call("POST", "/api/posting", {"url": "https://bad.example/"}))
+            self.assertEqual((st, r["error"]), (400, "Could not load that page"))
+            self.assertEqual(s.call("POST", "/api/posting", {"url": "https://jobs.example/1"}, headers={"Origin": "https://evil.example"})[0], 403)
+            _, job = j(s.call("POST", "/api/jobs", {"company": "A", "title": "x"}))
+            st, g = j(s.call("POST", f"/api/jobs/{job['id']}/interviews", {"starts_at": "2031-05-06T10:00", "label": "Panel"}))
+            self.assertEqual((st, g["interviews"][0]["label"]), (201, "Panel"))
+            iid = g["interviews"][0]["id"]
+            self.assertEqual(j(s.call("PATCH", f"/api/jobs/{job['id']}/interviews/{iid}", {"minutes": 30}))[1]["interviews"][0]["minutes"], 30)
+            self.assertEqual(j(s.call("GET", "/api/pulse"))[1]["upcoming_interviews"], [])  # more than two weeks away
+            self.assertEqual(j(s.call("DELETE", f"/api/jobs/{job['id']}/interviews/{iid}"))[1]["interviews"], [])
+            self.assertEqual(s.call("DELETE", f"/api/jobs/{job['id']}/interviews/{iid}")[0], 404)
+        finally:
+            s.stop()
+
+    def test_real_reader_refuses_local_addresses(self):
+        s = Server()
+        try:
+            st, r = j(s.call("POST", "/api/posting", {"url": s.base + "/api/backup"}))
+            self.assertEqual(st, 400)
+            self.assertIn("local network", r["error"])
+        finally:
+            s.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

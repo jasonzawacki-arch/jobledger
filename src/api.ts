@@ -51,6 +51,8 @@ export const api = {
   addContact: (id: number, d: Record<string, unknown>) => json<Job>('POST', `/api/jobs/${id}/contacts`, d),
   updateContact: (id: number, cid: number, d: Record<string, unknown>) => json<Job>('PATCH', `/api/jobs/${id}/contacts/${cid}`, d),
   delContact: (id: number, cid: number) => json<Job>('DELETE', `/api/jobs/${id}/contacts/${cid}`),
+  addInterview: (id: number, d: Record<string, unknown>) => json<Job>('POST', `/api/jobs/${id}/interviews`, d),
+  delInterview: (id: number, iid: number) => json<Job>('DELETE', `/api/jobs/${id}/interviews/${iid}`),
   addPrep: (id: number, text: string) => json<Job>('POST', `/api/jobs/${id}/prep`, { text }),
   defaultPrep: (id: number) => json<Job>('POST', `/api/jobs/${id}/prep/defaults`),
   setPrep: (id: number, pid: number, done: boolean) => json<Job>('PATCH', `/api/jobs/${id}/prep/${pid}`, { done }),
@@ -58,6 +60,7 @@ export const api = {
   importCsv: (csv: string) => json<{ imported: number }>('POST', '/api/import', { csv }),
   rewrite: (id: number, requirement: string) => json<Rewrite>('POST', `/api/jobs/${id}/rewrite`, { requirement }, { 'X-Anthropic-Key': getAiKey() }),
   pulse: () => json<Pulse>('GET', '/api/pulse'),
+  posting: (url: string) => json<{ source: 'posting' | 'page'; fields: Record<string, string> }>('POST', '/api/posting', { url }),
   search: (q: string) => json<{ ids: number[] }>('GET', `/api/search?q=${encodeURIComponent(q)}`),
   restore: (data: unknown) => json<{ jobs: number }>('POST', '/api/restore', data),
   async download(path: string, filename: string): Promise<void> {

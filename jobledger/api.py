@@ -13,8 +13,10 @@ from urllib.parse import urlsplit
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.concurrency import run_in_threadpool
 from starlette.routing import Route
 
+from . import posting
 from . import rewrite as rw
 from .db import Database
 from .service import NotFound, Tracker, ValidationError
@@ -34,7 +36,7 @@ def _hostname(value: str) -> str:
 
 def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir: Optional[str] = None,
              clock: Callable[[], float] = time.time, rewriter: Optional[rw.Rewriter] = None,
-             hosts: Iterable[str] = (), tz=None) -> Starlette:
+             hosts: Iterable[str] = (), tz=None, read_posting: Optional[Callable[[str], dict]] = None) -> Starlette:
     db = Database(db_path)
     tracker = Tracker(db, clock, tz=tz)
     # Without a token, only answer to names that point at this machine, unless more are listed (JL_HOSTS).
@@ -139,6 +141,24 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
 
     async def reopen(req):
         return JSONResponse(tracker.reopen(jid(req)))
+
+    async def posting_from_url(req):
+        d = await body(req)
+        url = d.get("url") if isinstance(d, dict) else None
+        try:
+            # urllib blocks, so run it in a worker thread and keep the server responsive
+            r = await run_in_threadpool(read_posting or posting.from_url, url)
+        except posting.PostingError as e:
+            raise ValidationError(str(e)) from None
+        return JSONResponse(r)
+
+    async def interviews(req):
+        return JSONResponse(tracker.add_interview(jid(req), await body(req)), status_code=201)
+
+    async def interview(req):
+        if req.method == "DELETE":
+            return JSONResponse(tracker.delete_interview(jid(req), sub(req)))
+        return JSONResponse(tracker.update_interview(jid(req), sub(req), await body(req)))
 
     async def search(req):
         return JSONResponse({"ids": tracker.search(req.query_params.get("q", ""))})
@@ -264,6 +284,9 @@ def make_app(db_path: str = ":memory:", token: Optional[str] = None, static_dir:
         Route("/api/resume", api(resume), methods=["GET", "PUT"]),
         Route("/api/pulse", api(pulse)),
         Route("/api/search", api(search)),
+        Route("/api/posting", api(posting_from_url), methods=["POST"]),
+        Route("/api/jobs/{id}/interviews", api(interviews), methods=["POST"]),
+        Route("/api/jobs/{id}/interviews/{sid}", api(interview), methods=["PATCH", "DELETE"]),
         Route("/api/calendar.ics", api(all_calendar)),
         Route("/api/jobs/{id}/calendar.ics", api(job_calendar)),
         Route("/api/export.csv", api(export_csv)),

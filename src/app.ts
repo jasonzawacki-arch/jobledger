@@ -1,6 +1,6 @@
 import { api, ApiError, getAiKey, getToken, setAiKey, setToken } from './api';
-import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, STAGES } from './types';
-import { esc, isoDay, plural, safeUrl, shortDate, tile } from './util';
+import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, SOURCES, STAGES } from './types';
+import { esc, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
 
 type View = 'board' | 'job' | 'pulse' | 'data';
 interface State {
@@ -25,7 +25,7 @@ function toast(msg: string): void {
   toastEl.textContent = msg;
   toastEl.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove('on'), 2200);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove("on"), Math.max(2200, msg.length * 45));
 }
 const active = () => S.jobs.filter((j) => !j.closed_reason);
 const closed = () => S.jobs.filter((j) => j.closed_reason);
@@ -64,7 +64,9 @@ function renderStrip(): void {
   stripEl.innerHTML = STAGES.map((n, i) => `<div style="--c:${stColor(i)}"><span>${n}</span><b>${active().filter((j) => j.stage === i).length}</b></div>`).join('');
 }
 function card(j: Job, draggable: boolean): string {
-  const tag = j.closed_reason ? `<span class="pill">${CLOSED_LABEL[j.closed_reason]}</span>` : j.follow_up_due ? '<span class="pill warn">Follow-up due</span>' : '';
+  const tag = j.closed_reason ? `<span class="pill">${CLOSED_LABEL[j.closed_reason]}</span>`
+    : j.next_interview ? `<span class="pill good" title="Next interview">${esc(whenLocal(j.next_interview))}</span>`
+    : j.follow_up_due ? '<span class="pill warn">Follow-up due</span>' : '';
   return `<button class="card" ${draggable ? 'draggable="true"' : ''} data-open="${j.id}"><span class="ch">${tile(j.company, j.id)}<span><b>${esc(j.company)}</b><small>${esc(j.title)}</small></span></span>
     <span class="row"><span class="mono mute">${j.closed_reason ? 'closed' : j.days_in_stage + 'd here'}</span>${tag}</span></button>`;
 }
@@ -102,8 +104,9 @@ function jobForm(j: Job | null): string {
       <label class="f">Title<input name="title" required maxlength="160" value="${v('title')}"></label>
       <label class="f">Location<input name="location" maxlength="120" value="${v('location')}"></label>
       <label class="f">Pay<input name="pay" maxlength="80" value="${v('pay')}"></label>
-      <label class="f">Posting link<input name="url" type="url" maxlength="500" placeholder="https://" value="${v('url')}"></label>
+      <label class="f">Posting link<span class="inline"><input name="url" type="url" maxlength="500" placeholder="https://" value="${v('url')}"><button class="btn" type="button" data-fill-link>Fill from link</button></span></label>
       <label class="f">Posted on<input name="posted_on" type="date" value="${v('posted_on')}"></label>
+      <label class="f">Where you found it<input name="source" maxlength="80" list="sources" placeholder="LinkedIn, referral…" value="${v('source')}"><datalist id="sources">${SOURCES.map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
       ${j ? '' : `<label class="f">Starting stage<select name="stage">${STAGES.slice(0, 2).map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select></label>`}
     </div>
     <label class="f">Posting text or notes about the role<textarea name="description" maxlength="60000">${v('description')}</textarea></label>
@@ -117,6 +120,21 @@ function contactsPanel(j: Job): string {
     <form data-contact-form class="grid2"><label class="f">Name<input name="name" required maxlength="120"></label><label class="f">Role<input name="role" maxlength="120" placeholder="Recruiter"></label>
       <label class="f">Email<input name="email" type="email" maxlength="200"></label><label class="f">Last contacted<input name="last_contacted_on" type="date"></label>
       <div class="btns" style="grid-column:1/-1"><button class="btn pri" type="submit">Add person</button></div></form></section>`;
+}
+function interviewsPanel(j: Job): string {
+  const list = (j.interviews ?? []).map((iv) => {
+    const place = iv.place ? (safeUrl(iv.place) ? `<a class="job-link" href="${esc(iv.place)}" target="_blank" rel="noopener noreferrer">Join link</a>` : esc(iv.place)) : '';
+    const cal = !iv.past && safeUrl(iv.calendar_link) ? `<a class="btn" href="${esc(iv.calendar_link)}" target="_blank" rel="noopener noreferrer">Add to Google Calendar</a>` : '';
+    return `<div class="fu${iv.past ? ' past' : ''}"><span><b>${esc(iv.label || 'Interview')}</b><br><small class="mute">${esc(whenLocal(iv.starts_at))} · ${iv.minutes} min${place ? ' · ' + place : ''}${iv.past ? ' · done' : ''}</small></span>
+      <span class="btns">${cal}<button class="btn danger" data-del-interview="${iv.id}" aria-label="Remove ${esc(iv.label || 'interview')}">Remove</button></span></div>`;
+  }).join('');
+  return `<section class="panel"><h3>Interviews</h3>${list || '<div class="empty">No interviews scheduled yet.</div>'}
+    <form data-interview-form class="grid2"><label class="f">Date and time<input name="starts_at" type="datetime-local" required></label>
+      <label class="f">Length<select name="minutes">${[30, 45, 60, 90, 120].map((m) => `<option value="${m}" ${m === 60 ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>
+      <label class="f">What<input name="label" maxlength="120" placeholder="Phone screen with Dana"></label>
+      <label class="f">Where<input name="place" maxlength="300" placeholder="Video link or address"></label>
+      <div class="btns" style="grid-column:1/-1"><button class="btn pri" type="submit">Add interview</button></div></form>
+    <span class="mute" style="font-size:12.5px">While an interview is coming up, this job is not flagged for a follow-up. The Data tab's calendar file includes interviews, with an alert an hour before.</span></section>`;
 }
 function prepPanel(j: Job): string {
   const items = (j.prep ?? []).map((p) => `<div class="fu"><label style="display:flex;gap:10px;align-items:center;min-width:0"><input type="checkbox" style="width:auto" data-prep="${p.id}" ${p.done ? 'checked' : ''}><span style="${p.done ? 'text-decoration:line-through;color:var(--mute)' : ''}">${esc(p.text)}</span></label><button class="btn danger" data-del-prep="${p.id}" aria-label="Remove item">Remove</button></div>`).join('');
@@ -168,7 +186,7 @@ function jobView(): string {
   ${S.form === 'edit' ? jobForm(j) : ''}
   <section class="hero">
     <div class="hero-top"><div class="ch" style="gap:14px">${tile(j.company, j.id)}<span><span class="mono mute">${esc(j.company)}</span><h2>${esc(j.title)}</h2></span></div>
-      <div class="chips">${j.location ? `<span class="chip">${esc(j.location)}</span>` : ''}${j.pay ? `<span class="chip">${esc(j.pay)}</span>` : ''}${j.posted_on ? `<span class="chip">Posted ${esc(isoDay(j.posted_on))}</span>` : ''}${j.follow_up_due ? '<span class="pill warn">Follow-up due</span>' : ''}</div></div>
+      <div class="chips">${j.location ? `<span class="chip">${esc(j.location)}</span>` : ''}${j.pay ? `<span class="chip">${esc(j.pay)}</span>` : ''}${j.posted_on ? `<span class="chip">Posted ${esc(isoDay(j.posted_on))}</span>` : ''}${j.source ? `<span class="chip">via ${esc(j.source)}</span>` : ''}${j.follow_up_due ? '<span class="pill warn">Follow-up due</span>' : ''}</div></div>
     ${reopenBar}
     <div class="track" role="group" aria-label="Stage">${STAGES.map((n, i) => `<button class="step ${i < j.stage ? 'done' : ''}" style="--c:${stColor(i)}" data-stage="${i}" aria-pressed="${j.stage === i}"><i></i>${n}</button>`).join('')}</div>
     <div class="btns"><button class="btn" data-edit>Edit details</button>${url ? `<a class="btn job-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open posting</a>` : ''}</div>
@@ -189,7 +207,8 @@ function jobView(): string {
       <ul class="tl">${events}</ul>
     </section>
   </div>
-  <div class="bench" style="margin-top:14px">${contactsPanel(j)}${prepPanel(j)}</div>`;
+  <div class="bench" style="margin-top:14px">${interviewsPanel(j)}${prepPanel(j)}</div>
+  <div class="bench" style="margin-top:14px">${contactsPanel(j)}</div>`;
 }
 const MATCH_BADGE: Record<string, [string, string]> = { match: ['good', 'Match'], partial: ['warn', 'Partial'], gap: ['bad', 'Gap'] };
 function ring(score: number): string {
@@ -228,23 +247,32 @@ function matchPanel(): string {
   }
   return `<section class="panel" style="margin-bottom:14px"><h3>How the posting matches your resume</h3>${inner}${note}</section>`;
 }
+const shortDay = (iso: string): string => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }); };
 function pulseView(): string {
   const p = S.pulse;
   if (!p) return '';
   const max = Math.max(...p.reached, 1);
   const closedTotal = p.closed.rejected + p.closed.withdrawn + p.closed.ghosted;
   const due = p.follow_ups_due.map((d) => `<div class="fu"><span><b>${esc(d.company)}</b><br><small class="mute">${esc(d.title)} · ${esc(d.stage_name)} · ${d.follow_up_on ? 'follow-up ' + esc(isoDay(d.follow_up_on)) : plural(d.idle_days, 'day') + ' quiet'}</small></span><button class="btn" data-open="${d.id}">Open</button></div>`).join('');
+  const soon = p.upcoming_interviews.map((u) => `<div class="fu"><span><b>${esc(whenLocal(u.starts_at))}</b><br><small class="mute">${esc(u.label || 'Interview')} · ${esc(u.company)} · ${esc(u.title)}</small></span><span class="btns">${safeUrl(u.calendar_link) ? `<a class="btn" href="${esc(u.calendar_link)}" target="_blank" rel="noopener noreferrer">Add to calendar</a>` : ''}<button class="btn" data-open="${u.job_id}">Open</button></span></div>`).join('');
+  const wmax = Math.max(...p.weekly_applied.map((w) => w.applied), 1);
+  const weeks = p.weekly_applied.map((w, i) => `<div class="wk" title="Week of ${esc(isoDay(w.week_of))}: ${plural(w.applied, 'application')}"><b>${w.applied || ''}</b><span style="height:calc((100% - 40px) * ${(w.applied / wmax).toFixed(3)})"></span><small>${i === p.weekly_applied.length - 1 ? 'Now' : esc(shortDay(w.week_of))}</small></div>`).join('');
+  const src = p.by_source.map((r) => `<tr><td>${esc(r.source)}</td><td class="num">${r.applied}</td><td class="num">${r.heard_back}</td><td class="num">${Math.round((r.heard_back / r.applied) * 100)}%</td></tr>`).join('');
   return `<div class="tiles">
     <div class="tile"><div class="mono mute">Active</div><div class="v">${p.active}</div><small>${plural(p.in_flight, 'application')} in flight</small></div>
-    <div class="tile"><div class="mono mute">Reached a screen</div><div class="v">${p.reached_screen_pct === null ? '–' : p.reached_screen_pct + '%'}</div><small>of those applied</small></div>
-    <div class="tile"><div class="mono mute">Follow-ups due</div><div class="v">${p.follow_ups_due.length}</div><small>waiting ${p.stale_days}+ days or past your date</small></div>
-    <div class="tile"><div class="mono mute">Avg days in stage</div><div class="v">${p.avg_days_in_stage ?? '–'}</div><small>active jobs</small></div></div>
+    <div class="tile"><div class="mono mute">Heard back</div><div class="v">${p.response_rate_pct === null ? '–' : p.response_rate_pct + '%'}</div><small>${p.heard_back} of ${plural(p.applied_total, 'application')}</small></div>
+    <div class="tile"><div class="mono mute">Days to a reply</div><div class="v">${p.median_days_to_reply ?? '–'}</div><small>median, applied to first answer</small></div>
+    <div class="tile"><div class="mono mute">Follow-ups due</div><div class="v">${p.follow_ups_due.length}</div><small>waiting ${p.stale_days}+ days or past your date</small></div></div>
   <div class="two">
+    <section class="panel"><h3>Coming up</h3>${soon || '<div class="empty">No interviews in the next two weeks.</div>'}</section>
+    <section class="panel"><h3>Follow-ups due</h3>${due || '<div class="empty">Nothing is waiting. Nice.</div>'}</section>
+    <section class="panel"><h3>Applications per week</h3><div class="weeks" role="img" aria-label="Applications per week, last 8 weeks: ${p.weekly_applied.map((w) => w.applied).join(', ')}">${weeks}</div></section>
     <section class="panel"><h3>How far applications get</h3><div class="mono mute">Jobs that ever reached this stage</div>
       ${STAGES.map((n, i) => `<div class="bar"><span>${n}</span><span class="trk"><i style="--c:${stColor(i)};width:${(p.reached[i] / max) * 100}%"></i></span><b>${p.reached[i]}</b></div>`).join('')}
       <p class="hint" style="margin:0">${closedTotal ? `Closed: ${p.closed.rejected} rejected, ${p.closed.ghosted} no response, ${p.closed.withdrawn} withdrawn.` : 'Nothing closed yet.'}</p>
     </section>
-    <section class="panel"><h3>Follow-ups due</h3>${due || '<div class="empty">Nothing is waiting. Nice.</div>'}</section>
+    <section class="panel"><h3>Where your applications came from</h3>${src ? `<table class="srct"><thead><tr><th>Source</th><th class="num">Applied</th><th class="num">Heard back</th><th class="num">Rate</th></tr></thead><tbody>${src}</tbody></table>
+      <p class="hint" style="margin:0">"Heard back" means it reached a screen or later, or was rejected. Set the source with Edit details.</p>` : '<div class="empty">Apply to a few jobs to see this.</div>'}</section>
   </div>`;
 }
 function dataView(): string {
@@ -317,7 +345,7 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview]');
   if (!t) return;
   const d = t.dataset;
   if (d.view) {
@@ -369,6 +397,8 @@ document.addEventListener('click', async (ev) => {
   }
   else if (d.keyRemove !== undefined) { setAiKey(''); S.rewrites = {}; toast('Key removed.'); }
   else if (d.exportCsv !== undefined) { await guard(() => api.download('/api/export.csv', 'jobledger.csv')); return; }
+  else if (d.delInterview && S.sel !== null) { const j = await guard(() => api.delInterview(S.sel!, Number(d.delInterview))); if (j) { setDetail(j); toast('Interview removed.'); await reload(); } return; }
+  else if (d.fillLink !== undefined) { await fillFromLink(t as HTMLButtonElement); return; }
   else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics`, `jobledger-follow-up-${S.sel}.ics`)); return; }
   else if (d.icsAll !== undefined) {
     if (!S.jobs.some((j) => !j.closed_reason && j.reminder_on)) { toast('No open jobs have a follow-up yet.'); return; }
@@ -397,6 +427,13 @@ document.addEventListener('submit', async (ev) => {
   if (f.matches('[data-contact-form]') && S.sel !== null) {
     const j = await guard(() => api.addContact(S.sel!, formData(f)));
     if (j) { setDetail(j); toast('Person added.'); } else return;
+    await reload(); return;
+  }
+  if (f.matches('[data-interview-form]') && S.sel !== null) {
+    const fd = new FormData(f);
+    const d = { starts_at: String(fd.get('starts_at') || ''), minutes: Number(fd.get('minutes') || 60), label: String(fd.get('label') || ''), place: String(fd.get('place') || '') };
+    const j = await guard(() => api.addInterview(S.sel!, d));
+    if (j) { setDetail(j); toast('Interview added.'); } else return;
     await reload(); return;
   }
   if (f.matches('[data-prep-form]') && S.sel !== null) {
@@ -457,6 +494,30 @@ document.addEventListener('change', async (ev) => {
     render();
   }
 });
+
+/* fill the add/edit form from a posting link; fields the user already typed are kept */
+const FILL_LABEL: Record<string, string> = { company: 'company', title: 'title', location: 'location', pay: 'pay', posted_on: 'posted date', description: 'posting text' };
+async function fillFromLink(btn: HTMLButtonElement): Promise<void> {
+  const f = btn.closest('form') as HTMLFormElement;
+  const url = (f.elements.namedItem('url') as HTMLInputElement).value.trim();
+  if (!url) { toast('Paste the posting link first.'); (f.elements.namedItem('url') as HTMLInputElement).focus(); return; }
+  btn.disabled = true; const label = btn.textContent; btn.textContent = 'Reading…';
+  try {
+    const r = await api.posting(url);
+    const filled: string[] = [], kept: string[] = [];
+    for (const [k, v] of Object.entries(r.fields)) {
+      const el = f.elements.namedItem(k) as HTMLInputElement | HTMLTextAreaElement | null;
+      if (!el || k === 'url' || !v) continue;
+      if (el.value.trim()) { if (el.value.trim() !== v) kept.push(FILL_LABEL[k] ?? k); continue; }
+      el.value = v; filled.push(FILL_LABEL[k] ?? k);
+    }
+    S.error = '';
+    toast(filled.length ? `Filled ${filled.join(', ')}${kept.length ? `; kept what you typed for ${kept.join(', ')}` : ''}.${r.source === 'page' ? ' This page had no job data, so check the details.' : ''}`
+      : 'Nothing new to fill: those fields already have text.');
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e));
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
 
 /* search: only the results are redrawn, so the box keeps focus and cursor while typing */
 let searchTimer: number | undefined;

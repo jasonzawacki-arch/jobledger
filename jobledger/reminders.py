@@ -52,9 +52,37 @@ def _fold(line: str) -> str:
     return "\r\n ".join(out)
 
 
-def ics(jobs: Iterable[dict], stamp: float) -> str:
-    """One VEVENT per job that has a reminder date. UIDs are per job, so importing again updates the event
-    in calendars that honor UIDs instead of adding a second copy."""
+def _interview_times(iv: dict) -> tuple[dt.datetime, dt.datetime]:
+    start = dt.datetime.fromisoformat(iv["starts_at"])
+    return start, start + dt.timedelta(minutes=iv["minutes"])
+
+
+def interview_summary(iv: dict, job: dict) -> str:
+    return f"{iv.get('label') or 'Interview'}: {job['title']} at {job['company']}"
+
+
+def interview_details(iv: dict, job: dict) -> str:
+    lines = []
+    if iv.get("place"):
+        lines.append(f"Where: {iv['place']}")
+    if str(job.get("url", "")).startswith(("http://", "https://")):
+        lines.append(f"Posting: {job['url']}")
+    lines.append("From JobLedger.")
+    return "\n".join(lines)
+
+
+def interview_link(iv: dict, job: dict) -> str:
+    start, end = _interview_times(iv)
+    q = {"action": "TEMPLATE", "text": interview_summary(iv, job), "dates": f"{start:%Y%m%dT%H%M%S}/{end:%Y%m%dT%H%M%S}",
+         "details": interview_details(iv, job)}
+    if iv.get("place"):
+        q["location"] = iv["place"]
+    return "https://calendar.google.com/calendar/render?" + urlencode(q)
+
+
+def ics(jobs: Iterable[dict], stamp: float, interviews: Iterable[dict] = ()) -> str:
+    """One VEVENT per job that has a reminder date, plus one per upcoming interview (alert an hour before).
+    UIDs are stable, so importing again updates events in calendars that honor UIDs instead of adding copies."""
     now = dt.datetime.fromtimestamp(stamp, dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//JobLedger//Follow-ups//EN", "CALSCALE:GREGORIAN",
              "METHOD:PUBLISH", "X-WR-CALNAME:JobLedger follow-ups"]
@@ -66,6 +94,16 @@ def ics(jobs: Iterable[dict], stamp: float) -> str:
                   f"DTSTART:{start:%Y%m%dT%H%M%S}", f"DTEND:{end:%Y%m%dT%H%M%S}",
                   f"SUMMARY:{_esc(summary(j))}", f"DESCRIPTION:{_esc(details(j))}",
                   "BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{_esc(summary(j))}", "TRIGGER:-PT0M", "END:VALARM",
+                  "END:VEVENT"]
+    for iv in interviews:
+        start, end = _interview_times(iv)
+        job = {"company": iv["company"], "title": iv["title"], "url": iv.get("url", "")}
+        lines += ["BEGIN:VEVENT", f"UID:jobledger-interview-{iv['id']}@jobledger.local", f"DTSTAMP:{now}",
+                  f"DTSTART:{start:%Y%m%dT%H%M%S}", f"DTEND:{end:%Y%m%dT%H%M%S}",
+                  f"SUMMARY:{_esc(interview_summary(iv, job))}", f"DESCRIPTION:{_esc(interview_details(iv, job))}"]
+        if iv.get("place"):
+            lines.append(f"LOCATION:{_esc(iv['place'])}")
+        lines += ["BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{_esc(interview_summary(iv, job))}", "TRIGGER:-PT60M", "END:VALARM",
                   "END:VEVENT"]
     lines.append("END:VCALENDAR")
     return "\r\n".join(_fold(x) for x in lines) + "\r\n"

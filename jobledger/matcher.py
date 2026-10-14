@@ -21,7 +21,20 @@ SYNONYMS = [
     ["natural language processing", "nlp"], ["rest", "restful"], ["node", "nodejs", "node.js"], ["react", "reactjs", "react.js"],
     ["sql", "sqlite", "mysql", "postgresql"], ["api", "apis"], ["test", "testing", "tests", "tested", "unit test"],
     ["dashboard", "dashboards", "reporting", "reports", "report"], ["analytics", "analysis", "analyze", "analyzed", "analyst"],
+    ["demo", "demos", "demonstration", "demonstrations"], ["customer", "customers", "client", "clients"],
+    ["docs", "documentation", "documented", "document", "documents"], ["kb", "wiki"],
 ]
+
+# A resume line that names a specific tool also shows the general skill it belongs to: SQLite is a database,
+# Salesforce is a CRM. Only the resume side is widened, so a posting that asks for Salesforce still needs Salesforce.
+IMPLIES = {
+    "sqlite": ["databas"], "sql": ["databas"], "postgresql": ["databas"], "oracl": ["databas"], "mongodb": ["databas"],
+    "salesforc": ["crm"], "hubspot": ["crm"], "zendesk": ["ticket", "helpdesk"], "jira": ["ticket"],
+    "terraform": ["iac"], "cloudform": ["iac"], "jenkin": ["ci"], "github": ["git"],
+    "docker": ["contain"], "kubernetes": ["contain"], "amazon web services": ["cloud"], "azur": ["cloud"], "google cloud": ["cloud"],
+}
+# Stems that the Porter rules leave apart although they are the same word.
+STEMFIX = {"container": "contain"}
 _CANON: dict[str, str] = {}
 for g in SYNONYMS:
     for w in g:
@@ -33,6 +46,13 @@ CUES = re.compile(r"\b(experience|proficien|knowledge|familiar|ability|skilled?|
 HEAD = re.compile(r"^(about|who we are|what you|responsibilit|requirement|qualification|benefits|perks|compensation|salary|our |why |equal|how to|nice to have|preferred|the role|overview)", re.I)
 
 MATCH_AT, PARTIAL_AT = 0.6, 0.3
+# Everyday verbs say little about fit ("manage", "run"), so they count half as much as the skill words around them.
+WEAK = {"run", "manag", "maintain", "deliv", "write", "build", "lead", "creat", "perform", "provid", "handl", "own",
+        "drive", "work", "make", "get", "keep", "set", "take"}
+
+
+def _w(t: str) -> float:
+    return 0.5 if t in WEAK else 1.0
 
 
 IRREGULAR = {"wrote": "write", "written": "write", "built": "build", "ran": "run", "led": "lead", "made": "make", "taught": "teach",
@@ -40,21 +60,126 @@ IRREGULAR = {"wrote": "write", "written": "write", "built": "build", "ran": "run
 # Multi-word skills are folded into one token before matching, so "continuous integration" equals "CI/CD".
 PHRASES = {"continuous integration": "ci", "continuous delivery": "ci", "continuous deployment": "ci", "machine learning": "ml",
            "natural language processing": "nlp", "amazon web services": "aws", "google cloud": "gcp", "unit test": "test", "unit tests": "test",
-           "unit testing": "test", "power bi": "powerbi", "project management": "project-management"}
+           "unit testing": "test", "power bi": "powerbi", "project management": "projectmanagement",
+           "knowledge base": "kb", "help center": "kb", "help desk": "helpdesk", "service desk": "helpdesk",
+           "infrastructure as code": "iac", "version control": "git"}
 _PHRASE_RE = re.compile(r"\b(" + "|".join(sorted((re.escape(k) for k in PHRASES), key=len, reverse=True)) + r")\b", re.I)
 
 
+_HYPHEN = re.compile(r"(?<=[A-Za-z])-(?=[A-Za-z])")
+
+
 def _fold(text: str) -> str:
-    return _PHRASE_RE.sub(lambda m: PHRASES[m.group(1).lower()], text)
+    """Splits hyphenated words into their parts, then folds multi-word skills into one token."""
+    split = re.sub(r"[A-Za-z]+(?:-[A-Za-z]+)+", lambda m: m.group(0) if m.group(0).lower() in STOP else _HYPHEN.sub(" ", m.group(0)), text)
+    return _PHRASE_RE.sub(lambda m: PHRASES[m.group(1).lower()], split)
+
+
+def _porter(w: str) -> str:
+    """The classic Porter (1980) stemmer, so "deliver", "delivering" and "delivered" all become "deliv"."""
+    if len(w) <= 2:
+        return w
+    V = "aeiou"
+
+    def cons(word, i):
+        ch = word[i]
+        if ch in V:
+            return False
+        if ch == "y":
+            return i == 0 or not cons(word, i - 1)
+        return True
+
+    def m(stem):
+        n, i, L = 0, 0, len(stem)
+        while i < L and cons(stem, i):
+            i += 1
+        while i < L:
+            while i < L and not cons(stem, i):
+                i += 1
+            if i >= L:
+                break
+            n += 1
+            while i < L and cons(stem, i):
+                i += 1
+        return n
+
+    def has_v(stem):
+        return any(not cons(stem, i) for i in range(len(stem)))
+
+    def dbl(word):
+        return len(word) > 1 and word[-1] == word[-2] and cons(word, len(word) - 1)
+
+    def cvc(word):
+        return (len(word) >= 3 and cons(word, len(word) - 3) and not cons(word, len(word) - 2)
+                and cons(word, len(word) - 1) and word[-1] not in "wxy")
+
+    def rep(word, pairs, cond):
+        for suf, new in pairs:
+            if word.endswith(suf):
+                stem = word[: -len(suf)]
+                return (stem + new) if cond(stem) else word, True
+        return word, False
+
+    # 1a
+    if w.endswith("sses"):
+        w = w[:-2]
+    elif w.endswith("ies"):
+        w = w[:-2]
+    elif w.endswith("ss"):
+        pass
+    elif w.endswith("s"):
+        w = w[:-1]
+    # 1b
+    flag = False
+    if w.endswith("eed"):
+        if m(w[:-3]) > 0:
+            w = w[:-1]
+    elif w.endswith("ed") and has_v(w[:-2]):
+        w, flag = w[:-2], True
+    elif w.endswith("ing") and has_v(w[:-3]):
+        w, flag = w[:-3], True
+    if flag:
+        if w.endswith(("at", "bl", "iz")):
+            w += "e"
+        elif dbl(w) and w[-1] not in "lsz":
+            w = w[:-1]
+        elif m(w) == 1 and cvc(w):
+            w += "e"
+    # 1c
+    if w.endswith("y") and has_v(w[:-1]):
+        w = w[:-1] + "i"
+    # 2
+    w, _ = rep(w, [("ational", "ate"), ("tional", "tion"), ("enci", "ence"), ("anci", "ance"), ("izer", "ize"), ("abli", "able"),
+                   ("alli", "al"), ("entli", "ent"), ("eli", "e"), ("ousli", "ous"), ("ization", "ize"), ("ation", "ate"),
+                   ("ator", "ate"), ("alism", "al"), ("iveness", "ive"), ("fulness", "ful"), ("ousness", "ous"), ("aliti", "al"),
+                   ("iviti", "ive"), ("biliti", "ble")], lambda st: m(st) > 0)
+    # 3
+    w, _ = rep(w, [("icate", "ic"), ("ative", ""), ("alize", "al"), ("iciti", "ic"), ("ical", "ic"), ("ful", ""), ("ness", "")],
+               lambda st: m(st) > 0)
+    # 4
+    for suf in ("al", "ance", "ence", "er", "ic", "able", "ible", "ant", "ement", "ment", "ent", "ion", "ou", "ism", "ate",
+                "iti", "ous", "ive", "ize"):
+        if w.endswith(suf):
+            st = w[: -len(suf)]
+            if m(st) > 1 and (suf != "ion" or st.endswith(("s", "t"))):
+                w = st
+            break
+    # 5
+    if w.endswith("e"):
+        st = w[:-1]
+        if m(st) > 1 or (m(st) == 1 and not cvc(st)):
+            w = st
+    if m(w) > 1 and dbl(w) and w.endswith("l"):
+        w = w[:-1]
+    return w
 
 
 def _stem(w: str) -> str:
     w = IRREGULAR.get(w, w)
-    for suf in ("ing", "ers", "er", "ed", "es", "s"):
-        if len(w) > len(suf) + 3 and w.endswith(suf):
-            w = w[: -len(suf)]
-            break
-    return w[:-1] if len(w) > 4 and w.endswith("e") else w
+    if not w.isalpha():
+        return w  # leave tokens like "c++", "ci/cd" or "s3" alone
+    w = _porter(w)
+    return STEMFIX.get(w, w)
 
 
 def terms(text: str) -> list[str]:
@@ -138,7 +263,11 @@ def _highlight(line: str, matched: set[str]) -> list[list]:
 
 def match(posting: str, resume: str) -> dict:
     lines = resume_lines(resume)
-    line_terms = [(l, set(terms(l)), _pairs(l)) for l in lines]
+    line_terms = []
+    for l in lines:
+        lt = set(terms(l))
+        lt |= {x for t in lt for x in IMPLIES.get(t, ())}  # SQLite also shows "database", and so on
+        line_terms.append((l, lt, _pairs(l)))
     reqs = requirements(posting)
     out = []
     for r in reqs:
@@ -150,7 +279,7 @@ def match(posting: str, resume: str) -> dict:
             hit = {t for t in rt if t in lt}
             # shared two-word phrases count extra: "unit testing" beats "unit" and "testing" apart
             bonus = 0.15 * len(rp & lp)
-            score = (len(hit) / len(rt) if rt else 0) + min(bonus, 0.3)
+            score = (sum(_w(t) for t in hit) / sum(_w(t) for t in rt) if rt else 0) + min(bonus, 0.3)
             if score > best_score:
                 best, best_score, best_hit = line, score, hit
         score = min(best_score, 1.0)

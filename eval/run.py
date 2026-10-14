@@ -34,15 +34,16 @@ def run(path: Path = Path(__file__).with_name("cases.json")) -> dict:
     return {"total": total, "correct": correct, "accuracy": correct / total, "false_matches": false_match, "missed_matches": missed_match, "misses": misses}
 
 
+SETS = [
+    ("cases.json", "tuning set 1 (used to build the matcher)"),
+    ("holdout.json", "tuning set 2 (held out at first, then used for the October 2026 improvements)"),
+    ("holdout2.json", "held-out set (written before the October 2026 changes, never used to adjust the matcher)"),
+]
+
 if __name__ == "__main__":
-    print("tuning set")
-    r = run()
-    print(f"{r['correct']}/{r['total']} labels agree ({r['accuracy']:.0%}); false matches: {r['false_matches']}; missed matches: {r['missed_matches']}")
-    if "--verbose" in sys.argv or r["misses"]:
-        for name, req, want, have in r["misses"]:
-            print(f"  {name}: '{req}' labeled {want}, matcher said {have}")
-    print("held-out set (written after tuning, never used to adjust the matcher)")
-    h = run(Path(__file__).with_name("holdout.json"))
-    print(f"{h['correct']}/{h['total']} labels agree ({h['accuracy']:.0%}); false matches: {h['false_matches']}; missed matches: {h['missed_matches']}")
-    for name, req, want, have in h["misses"]:
-        print(f"  {name}: '{req}' labeled {want}, matcher said {have}")
+    for name, label in SETS:
+        r = run(Path(__file__).with_name(name))
+        print(label)
+        print(f"  {r['correct']}/{r['total']} labels agree ({r['accuracy']:.0%}); false matches: {r['false_matches']}; missed matches: {r['missed_matches']}")
+        for case, req, want, have in r["misses"]:
+            print(f"    {case}: '{req}' labeled {want}, matcher said {have}")
