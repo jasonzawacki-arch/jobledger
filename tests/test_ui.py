@@ -389,6 +389,47 @@ class UI(unittest.TestCase):
         self.assertEqual(self.errors, [])
         ctx.close()
 
+    def test_req12_phone_touch_sizing_and_board(self):
+        # Req. 12 (U-1): primary controls reach >=44px touch height at phone widths only;
+        # (U-2): the board snap-scrolls one column at a time and the stage strip jumps to columns;
+        # (U-3): the small-text floor (12px labels / 13px hints) applies at phone widths.
+        pg = self.page(w=390, h=800)
+        tab_h = pg.evaluate("document.querySelector('.tab').getBoundingClientRect().height")
+        self.assertGreaterEqual(tab_h, 44, "tab")
+        btn_h = pg.evaluate("document.querySelector('button.btn').getBoundingClientRect().height")
+        self.assertGreaterEqual(btn_h, 44, "btn")
+        strip_fs = float(pg.evaluate("getComputedStyle(document.querySelector('.strip span')).fontSize").replace("px", ""))
+        self.assertGreaterEqual(strip_fs, 12, "strip label")
+        hint_fs = float(pg.evaluate("getComputedStyle(document.querySelector('p.hint')).fontSize").replace("px", ""))
+        self.assertGreaterEqual(hint_fs, 13, "hint")
+        snap = pg.evaluate("getComputedStyle(document.querySelector('.board')).scrollSnapType")
+        self.assertEqual(snap, "x mandatory")
+        align = pg.evaluate("getComputedStyle(document.querySelector('.col')).scrollSnapAlign")
+        self.assertEqual(align, "start")
+        # strip as column jumper: tapping a stage scrolls its column into view
+        pg.click("#strip div[data-jump='2']")
+        pg.wait_for_function("document.querySelector('.board').scrollLeft > 50")
+        # keyboard path on the same jumper
+        pg.evaluate("document.querySelector('.board').scrollLeft = 0")
+        pg.focus("#strip div[data-jump='4']")
+        pg.keyboard.press("Enter")
+        pg.wait_for_function("document.querySelector('.board').scrollLeft > 100")
+        # job view: stage steps reach the touch target too
+        self.add(pg, "Phone Co", "Role")
+        pg.click(".cardbody")
+        pg.wait_for_selector(".hero")
+        step_h = pg.evaluate("document.querySelector('.step').getBoundingClientRect().height")
+        self.assertGreaterEqual(step_h, 44, "step")
+        step_fs = float(pg.evaluate("getComputedStyle(document.querySelector('.step')).fontSize").replace("px", ""))
+        self.assertGreaterEqual(step_fs, 12, "step label")
+        # desktop widths are untouched: 34px-ish buttons and the wide board layout
+        pg2 = self.page(w=1280, h=900)
+        btn_h2 = pg2.evaluate("document.querySelector('button.btn').getBoundingClientRect().height")
+        self.assertLess(btn_h2, 44, "desktop button stays small")
+        snap2 = pg2.evaluate("getComputedStyle(document.querySelector('.board')).scrollSnapType")
+        self.assertEqual(snap2, "none")
+        self.assertEqual(self.errors, [])
+
     @unittest.skipUnless(SHOTS, "set JL_SHOTS=dir to save screenshots")
     def test_screenshots(self):
         from jobledger.__main__ import load_demo

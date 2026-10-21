@@ -71,7 +71,14 @@ function renderTabs(): void {
   tabsEl.innerHTML = t.map(([v, n]) => `<button class="tab" role="tab" data-view="${v}" aria-selected="${S.view === v}">${n}</button>`).join('');
 }
 function renderStrip(): void {
-  stripEl.innerHTML = STAGES.map((n, i) => `<div style="--c:${stColor(i)}"><span>${n}</span><b>${active().filter((j) => j.stage === i).length}</b></div>`).join('');
+  // Req. 12 (U-2): at phone widths the strip doubles as the board's column jumper
+  // (data-jump handled in the click/keydown listeners below; .board snap columns in style.css).
+  stripEl.innerHTML = STAGES.map((n, i) => `<div style="--c:${stColor(i)}" data-jump="${i}" role="button" tabindex="0" aria-label="Show the ${n} column"><span>${n}</span><b>${active().filter((j) => j.stage === i).length}</b></div>`).join('');
+}
+// Req. 12 (U-2): scroll the board's stage column into view; a no-op when the board
+// is not on screen or all columns already fit (wide layouts).
+function jumpToColumn(i: number): void {
+  document.querySelector(`[data-col="${i}"]`)?.scrollIntoView({ block: 'nearest', inline: 'start', behavior: 'smooth' });
 }
 function card(j: Job, draggable: boolean): string {
   const tag = j.closed_reason ? `<span class="pill">${CLOSED_LABEL[j.closed_reason]}</span>`
@@ -110,7 +117,7 @@ function board(): string {
     ? `<label class="search"><span class="sr">Search jobs</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input type="search" data-search placeholder="Search company, title, notes, people" value="${esc(S.query)}" autocomplete="off" enterkeyhint="search"></label>` : '';
   const proHint = BUILD === 'play' && !isPro() ? `<span class="hint mono" style="margin:0 0 0 8px" role="status">Free tier: ${S.jobs.length}/${FREE_JOB_CAP} applications</span>` : '';
   return `<div class="row toolbar">${search}<button class="btn pri" data-add>Add job</button>${proHint}</div>
-    <p class="hint" style="margin:0 0 10px">${TOUCH ? 'Tap a card to open it, or use its Move button to change stage.' : 'Drag a card to another column to move it, or tap it to open.'}</p>${S.form === 'add' ? jobForm(null) : ''}
+    <p class="hint" style="margin:0 0 10px">${TOUCH ? 'Tap a stage above to jump to its column, tap a card to open it, or use its Move button to change stage.' : 'Drag a card to another column to move it, or tap it to open.'}</p>${S.form === 'add' ? jobForm(null) : ''}
     ${S.jobs.length === 0 && S.loaded ? '<div class="empty" style="margin-bottom:12px">Nothing tracked yet. Add your first job to get started.</div>' : ''}
     <div data-results>${boardResults()}</div>`;
 }
@@ -401,9 +408,10 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-paste-posting],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-paste-posting],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to],[data-jump]');
   if (!t) return;
   const d = t.dataset;
+  if (d.jump !== undefined) { jumpToColumn(Number(d.jump)); return; }
   if (d.move !== undefined) { // Req. 9: toggle the per-card Move menu (board)
     const id = Number(d.move);
     S.moveMenu = S.moveMenu === id ? null : id;
@@ -641,6 +649,7 @@ document.addEventListener('keydown', (ev) => {
   const t = ev.target as HTMLInputElement;
   if (ev.key === 'Escape' && t.matches('[data-search]') && t.value) { t.value = ''; S.query = ''; clearTimeout(searchTimer); void runSearch(); }
   else if (ev.key === 'Escape' && S.moveMenu !== null) { S.moveMenu = null; render(); }
+  else if ((ev.key === 'Enter' || ev.key === ' ') && t.matches('[data-jump]')) { ev.preventDefault(); jumpToColumn(Number(t.dataset.jump)); }
 });
 
 /* drag and drop between columns */
