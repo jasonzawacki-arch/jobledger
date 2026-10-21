@@ -4,6 +4,7 @@
 // backup moves freely between the phone and the server.
 import { match as runMatch } from './matcher';
 import { DEFAULT_MODEL, SYSTEM, diffParts, guard } from './rewrite';
+import { gateMessage, isPro } from '../pro';
 
 export interface JobRow {
   id: number; company: string; title: string; location: string; pay: string; url: string; posted_on: string; description: string; source: string;
@@ -242,6 +243,10 @@ export class Engine {
 
   // ---------- jobs
   addJob(d: unknown) {
+    // Pro gate (Req. 5): the free-tier cap applies in the Play build only.
+    const mode = typeof window !== 'undefined' ? ((window as unknown as { __JL_MODE__?: string }).__JL_MODE__ || '') : '';
+    const denied = gateMessage(mode, isPro(), this.d.jobs.length);
+    if (denied) throw new Bad(denied);
     if (!d || typeof d !== 'object') throw new Bad('Expected an object');
     const o = d as Record<string, unknown>;
     const vals = {} as Record<Editable, string>;
