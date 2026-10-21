@@ -58,6 +58,9 @@ installable(dist, server, 'sw.js');
 const phone = page('src/boot-phone.ts');
 installable(path.join(dist, 'app'), phone, 'sw-phone.js');
 fs.writeFileSync(path.join(dist, 'app', '.nojekyll'), '');
+// Privacy policy is hosted alongside the phone app (Pages uploads dist/app),
+// at https://jasonzawacki-arch.github.io/jobledger/privacy.html — the URL the Play listing uses.
+fs.copyFileSync(path.join(root, 'src/privacy.html'), path.join(dist, 'app', 'privacy.html'));
 fs.mkdirSync(path.join(dist, 'demo'), { recursive: true });
 fs.writeFileSync(path.join(dist, 'demo', 'index.html'), page('src/boot-demo.ts'));
 fs.mkdirSync(path.join(dist, 'play'), { recursive: true });
