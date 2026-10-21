@@ -68,9 +68,18 @@ h1, h2, h3 { font-family: var(--display); margin: 0; letter-spacing: -0.015em; t
 .col h3 { font-size: 14px; display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
 .col h3 .mono { margin-left: auto; }
-.card { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-shadow: var(--shadow); transition: transform 0.15s, border-color 0.15s; }
+.card { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-shadow: var(--shadow); transition: transform 0.15s, border-color 0.15s; position: relative; }
 .card:hover { transform: translateY(-1px); border-color: var(--accent); }
 .card.drag { opacity: 0.4; }
+.cardbody { display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 0 52px 0 0; margin: 0; text-align: left; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; }
+/* Req. 9: per-card Move button + stage menu — the touch path for changing stage from the board */
+.movebtn { position: absolute; top: 6px; right: 6px; min-width: 44px; height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--mute); font-size: 18px; line-height: 1; cursor: pointer; }
+.movebtn:hover, .movebtn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.movemenu { position: absolute; top: 56px; right: 6px; z-index: 40; display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.menui { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.menui:hover { background: var(--panel-2); }
+.menui i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+.menui.cur { font-weight: 700; }
 .ch { display: flex; gap: 10px; align-items: center; min-width: 0; }
 .mono-tile { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 15px; background: var(--tile-bg); color: var(--tile-fg); }
 .ch b { font-weight: 600; display: block; line-height: 1.25; }

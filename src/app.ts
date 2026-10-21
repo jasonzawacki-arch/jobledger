@@ -5,6 +5,9 @@ import { calLink, esc, userTimeZone, isoDay, plural, safeUrl, shortDate, tile, w
 
 /** Which build this is: served by the Python server, the installable phone app, the demo, or the Play build. */
 const BUILD: 'server' | 'phone' | 'demo' | 'play' = ((window as unknown as { __JL_MODE__?: string }).__JL_MODE__ as 'phone' | 'demo' | 'play') || 'server';
+/** Touch-primary input (Req. 9): HTML5 drag-and-drop between columns does not work there. */
+const TOUCH = typeof matchMedia === 'function'
+  && (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0);
 /** The JobLedger server the phone app is connected to, if any. */
 const REMOTE: string = (window as unknown as { __JL_REMOTE__?: string }).__JL_REMOTE__ || '';
 /** Where the data lives: 'server' (a JobLedger server), 'phone' (saved on this device), 'demo' (sample data, not saved) or 'play' (the Play build's device storage). */
@@ -13,13 +16,13 @@ type View = 'board' | 'job' | 'pulse' | 'data';
 interface State {
   view: View; jobs: Job[]; sel: number | null; detail: Job | null; pulse: Pulse | null; match: Match | null; resume: string;
   showClosed: boolean; form: 'add' | 'edit' | null; confirmDelete: boolean; pendingRestore: any | null;
-  needToken: boolean; error: string; loaded: boolean;
+  needToken: boolean; error: string; loaded: boolean; moveMenu: number | null;
   rewrites: Record<string, Rewrite | 'busy'>; draft: boolean;
   query: string; hits: Set<number> | null; whereError: boolean;
 }
 const S: State = {
   view: 'board', jobs: [], sel: null, detail: null, pulse: null, match: null, resume: '', showClosed: false, form: null,
-  confirmDelete: false, pendingRestore: null, needToken: false, error: '', loaded: false, rewrites: {}, draft: false,
+  confirmDelete: false, pendingRestore: null, needToken: false, error: '', loaded: false, moveMenu: null, rewrites: {}, draft: false,
   query: '', hits: null, whereError: false,
 };
 const viewEl = document.getElementById('view') as HTMLElement;
@@ -74,15 +77,22 @@ function card(j: Job, draggable: boolean): string {
   const tag = j.closed_reason ? `<span class="pill">${CLOSED_LABEL[j.closed_reason]}</span>`
     : j.next_interview ? `<span class="pill good" title="Next interview">${esc(whenLocal(j.next_interview))}</span>`
     : j.follow_up_due ? '<span class="pill warn">Follow-up due</span>' : '';
-  return `<button class="card" ${draggable ? 'draggable="true"' : ''} data-open="${j.id}"><span class="ch">${tile(j.company, j.id)}<span><b>${esc(j.company)}</b><small>${esc(j.title)}</small></span></span>
+  const body = `<button class="cardbody" data-open="${j.id}" aria-label="Open ${esc(j.company)}, ${esc(j.title)}"><span class="ch">${tile(j.company, j.id)}<span><b>${esc(j.company)}</b><small>${esc(j.title)}</small></span></span>
     <span class="row"><span class="mono mute">${j.closed_reason ? 'closed' : j.days_in_stage + 'd here'}</span>${tag}</span></button>`;
+  // Req. 9: a per-card Move menu, so a stage change from the board costs two taps on touch devices
+  // (open menu, pick stage) and is keyboard-reachable on desktop. Closed cards keep open-only.
+  if (!draggable) return `<div class="card" data-open="${j.id}">${body}</div>`;
+  const open = S.moveMenu === j.id;
+  const menu = open ? `<div class="movemenu" role="menu" aria-label="Move ${esc(j.company)} to stage">${STAGES.map((n, i) =>
+    `<button class="menui${i === j.stage ? ' cur' : ''}" role="menuitemradio" aria-checked="${i === j.stage}" data-move-to="${i}" data-open="${j.id}"><i style="--c:${stColor(i)}"></i>${n}</button>`).join('')}</div>` : '';
+  return `<div class="card" draggable="true" data-open="${j.id}">${body}<button class="movebtn" data-move="${j.id}" aria-haspopup="menu" aria-expanded="${open}" title="Move to another stage" aria-label="Move ${esc(j.company)} to another stage">⇄</button>${menu}</div>`;
 }
 const shown = (j: Job) => S.hits === null || S.hits.has(j.id);
 function boardResults(): string {
   const searching = S.hits !== null;
   const cols = STAGES.map((n, i) => {
     const list = active().filter((j) => j.stage === i && shown(j));
-    const none = searching ? 'No matches.' : i === 4 ? 'No offers yet.' : 'Drop a job here.';
+    const none = searching ? 'No matches.' : i === 4 ? 'No offers yet.' : TOUCH ? 'Nothing here yet.' : 'Drop a job here.';
     return `<section class="col" data-col="${i}" aria-label="${n}"><h3><span class="dot" style="--c:${stColor(i)}"></span>${n}<span class="mono mute">${list.length}</span></h3>${
       list.map((j) => card(j, true)).join('') || `<div class="empty">${none}</div>`}</section>`;
   }).join('');
@@ -100,7 +110,7 @@ function board(): string {
     ? `<label class="search"><span class="sr">Search jobs</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input type="search" data-search placeholder="Search company, title, notes, people" value="${esc(S.query)}" autocomplete="off" enterkeyhint="search"></label>` : '';
   const proHint = BUILD === 'play' && !isPro() ? `<span class="hint mono" style="margin:0 0 0 8px" role="status">Free tier: ${S.jobs.length}/${FREE_JOB_CAP} applications</span>` : '';
   return `<div class="row toolbar">${search}<button class="btn pri" data-add>Add job</button>${proHint}</div>
-    <p class="hint" style="margin:0 0 10px">Drag a card to another column to move it, or tap it to open.</p>${S.form === 'add' ? jobForm(null) : ''}
+    <p class="hint" style="margin:0 0 10px">${TOUCH ? 'Tap a card to open it, or use its Move button to change stage.' : 'Drag a card to another column to move it, or tap it to open.'}</p>${S.form === 'add' ? jobForm(null) : ''}
     ${S.jobs.length === 0 && S.loaded ? '<div class="empty" style="margin-bottom:12px">Nothing tracked yet. Add your first job to get started.</div>' : ''}
     <div data-results>${boardResults()}</div>`;
 }
@@ -373,7 +383,7 @@ function applyTheme(t: string): void {
   else document.documentElement.removeAttribute('data-theme');
 }
 async function open(id: number): Promise<void> {
-  S.sel = id; S.confirmDelete = false; S.form = null; S.view = 'job'; S.rewrites = {}; S.draft = false;
+  S.sel = id; S.confirmDelete = false; S.form = null; S.view = 'job'; S.rewrites = {}; S.draft = false; S.moveMenu = null;
   const j = await guard(() => api.job(id));
   if (j) { setDetail(j); S.match = (await guard(() => api.match(id))) ?? null; }
   render();
@@ -390,9 +400,21 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to]');
   if (!t) return;
   const d = t.dataset;
+  if (d.move !== undefined) { // Req. 9: toggle the per-card Move menu (board)
+    const id = Number(d.move);
+    S.moveMenu = S.moveMenu === id ? null : id;
+    render(); return;
+  }
+  if (d.moveTo !== undefined && d.open !== undefined) { // Req. 9: stage picked from the Move menu
+    const id = Number(d.open), stage = Number(d.moveTo);
+    S.moveMenu = null;
+    const cur = S.jobs.find((j) => j.id === id);
+    if (cur && cur.stage !== stage) await moveTo(id, stage); else render();
+    return;
+  }
   if (d.gsOn !== undefined) { void gsync()?.link(); return; }
   if (d.gsNow !== undefined) { void gsync()?.now(true); return; }
   if (d.gsOff !== undefined) { gsync()?.off(); return; }
@@ -609,6 +631,7 @@ document.addEventListener('input', (ev) => {
 document.addEventListener('keydown', (ev) => {
   const t = ev.target as HTMLInputElement;
   if (ev.key === 'Escape' && t.matches('[data-search]') && t.value) { t.value = ''; S.query = ''; clearTimeout(searchTimer); void runSearch(); }
+  else if (ev.key === 'Escape' && S.moveMenu !== null) { S.moveMenu = null; render(); }
 });
 
 /* drag and drop between columns */

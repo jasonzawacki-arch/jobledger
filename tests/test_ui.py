@@ -357,6 +357,38 @@ class UI(unittest.TestCase):
         pg.fill("input[name=token]", "pw"); pg.click("[data-token-form] button")
         pg.wait_for_selector(".board")
 
+    def test_board_move_menu(self):
+        # Req. 9: stage change from the board without opening the job — two taps on touch
+        pg = self.page()
+        self.assertIn("Drag a card", pg.locator("p.hint").first.inner_text())
+        self.add(pg, "Acme Corp", "Data Analyst")  # Applied = stage 1
+        pg.click("[data-move]")
+        pg.wait_for_selector(".movemenu")
+        pg.click("[data-move-to='2']")
+        pg.wait_for_selector("[data-col='2'] .card >> text=Acme Corp")
+        self.assertEqual(pg.locator("[data-col='1'] .card").count(), 0)
+        self.assertIn("Moved to Screen", pg.inner_text(".toast"))
+        # toggle open, then Escape dismisses with the job unmoved
+        pg.click("[data-move]")
+        pg.wait_for_selector(".movemenu")
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector(".movemenu", state="detached")
+        self.assertEqual(pg.locator("[data-col='2'] .card").count(), 1)
+        self.assertEqual(self.errors, [])
+
+    def test_touch_board_hint(self):
+        # Req. 9: on touch devices the board hint must not describe drag-and-drop
+        ctx = self.browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+        pg = ctx.new_page()
+        pg.on("pageerror", lambda e: self.errors.append(str(e)))
+        pg.goto(self.s.base + "/")
+        pg.wait_for_selector(".board")
+        hint = pg.locator("p.hint").first.inner_text()
+        self.assertIn("Move button", hint)
+        self.assertNotIn("Drag", hint)
+        self.assertEqual(self.errors, [])
+        ctx.close()
+
     @unittest.skipUnless(SHOTS, "set JL_SHOTS=dir to save screenshots")
     def test_screenshots(self):
         from jobledger.__main__ import load_demo
