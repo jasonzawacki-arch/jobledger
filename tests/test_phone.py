@@ -248,6 +248,32 @@ class Phone(unittest.TestCase):
         self.assertEqual((manifest["start_url"], manifest["scope"], manifest["display"]), ("./", "./", "standalone"))
         self.assertTrue(all(not i["src"].startswith("/") for i in manifest["icons"]))  # works under any folder
 
+    def test_paste_posting_button_fills_description(self):
+        # clipboard needs explicit grants even in a trusted test context
+        ctx = self.browser.new_context(viewport={"width": 390, "height": 844},
+                                       permissions=["clipboard-read", "clipboard-write"])
+        pg = ctx.new_page()
+        pg.on("pageerror", lambda e: self.errors.append(str(e)))
+        pg.goto(self.site.base); pg.wait_for_selector(".board")
+        pg.click("[data-view=data]")
+        pg.fill("textarea[name=text]", "- Wrote Python scripts to clean data")
+        pg.click("[data-resume-form] button[type=submit]")
+        pg.wait_for_selector("#toast >> text=Resume saved")
+        pg.click("[data-view=board]")
+        pg.evaluate("navigator.clipboard.writeText('Requirements:\\n- Strong SQL skills')")
+        pg.click("[data-add]"); pg.wait_for_selector("[data-paste-posting]")
+        self.assertIn("matching runs on it", pg.inner_text("form[data-form=add]"))
+        pg.click("[data-paste-posting]")
+        pg.wait_for_selector("#toast >> text=Pasted")
+        self.assertEqual(pg.eval_on_selector("textarea[name=description]", "el => el.value"),
+                         "Requirements:\n- Strong SQL skills")
+        # pasting is not a no-op: the matcher runs on the pasted text after save
+        pg.fill("input[name=company]", "Initech"); pg.fill("input[name=title]", "Analyst")
+        pg.click("form[data-form=add] button[type=submit]"); pg.wait_for_selector(".req")
+        self.assertIn("Strong SQL skills", pg.inner_text(".panel:has(h3:text('How the posting matches'))"))
+        ctx.close()
+        self.assertEqual((self.errors, self.api_calls), ([], []))
+
 
 @unittest.skipUnless(sync_playwright and (ROOT / "dist" / "preview.html").exists(), "needs playwright and the preview build")
 class Demo(unittest.TestCase):
