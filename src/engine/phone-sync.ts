@@ -35,6 +35,12 @@ export class Tracker {
     if (changed) void saveMeta(this.mt);
     return changed;
   }
+  /** Called with the dataset right after a backup restore: the restored records are historical values,
+   * not fresh edits, so their change times stay as they were. The next sync then reconciles per record
+   * (the newer change wins) instead of letting the restored copy silently out-rank the other device. */
+  restored(d: Data): void {
+    this.snap = snapshot(d);
+  }
   items(d: Data): Items {
     const it: Items = {};
     for (const t of TABLES) for (const r of d[t] as Rec[]) it[t + ':' + r.id] = { t: this.mt[t + ':' + r.id] || 0, v: r };

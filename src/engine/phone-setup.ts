@@ -23,12 +23,16 @@ if (remote) {
 } else {
   const tracker = new Tracker();
   let sync: { state: { on: boolean } } | null = null;
+  let engine: Engine;
   install(load().then(async (d) => {
     await tracker.start(d);
-    const engine = new Engine(d, {
+    engine = new Engine(d, {
       save: (x) => {
         void save(x); keepData();
-        if (tracker.saved(x)) (window as unknown as { __JL_SYNC_CHANGED__?: () => void }).__JL_SYNC_CHANGED__?.();
+        // A restore replaces the dataset with historical values: keep the old change times so the
+        // next sync reconciles per record (newer wins) instead of pushing the backup over Drive.
+        if (engine.restoredSync) tracker.restored(x);
+        else if (tracker.saved(x)) (window as unknown as { __JL_SYNC_CHANGED__?: () => void }).__JL_SYNC_CHANGED__?.();
       },
       fetch: realFetch,
       uniqueIds: () => !!sync && sync.state.on,
