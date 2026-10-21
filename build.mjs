@@ -1,8 +1,9 @@
 // Dependency-free bundler: transpiles TypeScript with the compiler API, joins relative imports into one IIFE,
-// and inlines the CSS into a single HTML file. Builds the same interface three ways:
+// and inlines the CSS into a single HTML file. Builds the same interface four ways:
 //   dist/index.html        served by the Python server (data on your computer)
 //   dist/app/index.html    the installable phone app (data saved on the phone; host as static files)
 //   dist/demo/index.html   the demo preview's base (python preview/build_preview.py adds the sample data)
+//   dist/play/index.html   the Google Play build (no service worker, no server/sync/API-key panels, Pro gate)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -59,4 +60,6 @@ installable(path.join(dist, 'app'), phone, 'sw-phone.js');
 fs.writeFileSync(path.join(dist, 'app', '.nojekyll'), '');
 fs.mkdirSync(path.join(dist, 'demo'), { recursive: true });
 fs.writeFileSync(path.join(dist, 'demo', 'index.html'), page('src/boot-demo.ts'));
-console.log('dist/index.html', (server.length / 1024).toFixed(0) + ' KB;', 'dist/app/index.html', (phone.length / 1024).toFixed(0) + ' KB;', 'dist/demo/index.html');
+fs.mkdirSync(path.join(dist, 'play'), { recursive: true });
+fs.writeFileSync(path.join(dist, 'play', 'index.html'), page('src/boot-play.ts'));
+console.log('dist/index.html', (server.length / 1024).toFixed(0) + ' KB;', 'dist/app/index.html', (phone.length / 1024).toFixed(0) + ' KB;', 'dist/demo/index.html', 'dist/play/index.html', (fs.statSync(path.join(dist, 'play', 'index.html')).size / 1024).toFixed(0) + ' KB;');
