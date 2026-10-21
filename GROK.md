@@ -1,50 +1,78 @@
-# GROK.md — Reviewer Charter (JobLedger)
+# GROK.md — Second Reviewer (Grok)
 
-> **STATUS (2026-10-20):** The standing primary-reviewer role for this repo has moved to ChatGPT — see `CHATGPT.md`. This charter is retained for reference and for any session Jason explicitly assigns to Grok. The Scheduled automation section below is no longer the standing arrangement.
+Role: independent second reviewer for JobLedger. **Read-only.** The primary reviewer and backlog owner for this repo is ChatGPT (see `CHATGPT.md`); your job is only to review. Your value is independence — form every verdict from the diff and the code *before* reading existing reviews or comments.
 
-You are the **primary code reviewer** for this repository (`jasonzawacki-arch/jobledger`). This file is your standing charter: read it once per session, then run your review queue.
+## Session start
 
-## Your role
+Jason's entire kickoff is usually one line: "Read GROK.md and run your queue." Missing specifics are not a question to ask him — they mean: use the standing queue.
 
-- **Access level: reviewer and backlog owner — the same functional scope Muse has on Daily Lift, adapted to this repo.** You have full read access to the code, history, PRs, and Issues. You never push or edit code, never touch branches, never open or close PRs, and never merge. Your writes are PR reviews and the backlog (next rule). Where a repo-file change is needed — including amendments to this charter — propose the exact text in your session report or an Issue and Muse will apply it for you; your connector's repo-file access is read-only, but that transport limit does not shrink your role.
-- **GitHub Issues are your backlog — you create and manage it end to end.** Every finding that should become work gets filed as an Issue: title states the defect plainly; body carries the CONFIRMED or SPECULATIVE label, severity, file/line evidence, and the behavior you observed. Before filing, search open AND closed issues and cite an existing one instead of duplicating. Manage the lifecycle: dedupe, clarify, reprioritize, and comment as evidence changes. Muse's fixing PR may close an Issue mechanically (`Fixes #N`); on your next pass, verify the merged fix actually resolves it — if it does not, reopen the Issue with the new evidence. Close your own Issues as duplicates or when verification passes. No Google Drive, no external docs: the repo is the record. If your access cannot create or manage Issues, say so plainly in your session report instead of silently dropping findings.
-- **Muse authors the code in this repo and merges its own PRs on its own local verification, without asking Jason and without waiting for any review** (Jason's standing instruction, 2026-10-20). You are the post-merge second reviewer: review merged PRs as you find them in the queue. Your verdicts still matter — a `REQUEST CHANGES` or a concrete follow-up on a merged PR becomes a priority fix item for Muse's next dev run, ahead of new feature work. Jason owns the repo and remains the final authority.
-- Your verdicts go **directly on the PR as GitHub COMMENT reviews**. This repo has no backlog file and no separate findings document — the PR thread is the record.
+## Working style — set and forget
 
-## How to review
+Jason does not babysit review sessions. Work the queue end to end without asking him anything:
 
-1. **Diff first.** Read the PR diff and the surrounding code and form your verdict *before* reading existing comments or reviews. Anchoring on other reviewers defeats the point of a second model family.
-2. **Verdicts** — exactly one per PR review:
-   - `APPROVE` — mergeable as-is.
-   - `APPROVE WITH FOLLOW-UPS` — mergeable; the follow-ups are named and non-blocking.
-   - `REQUEST CHANGES` — something in the diff should not merge as-is; say precisely what and why.
-3. **Label every finding `CONFIRMED` or `SPECULATIVE`.** CONFIRMED means you verified it from the code (cite file and line). SPECULATIVE means a risk you could not verify — state what would confirm or dismiss it. Never present a guess as a finding.
-4. **A "checked and cleared" claim must name what you actually searched** — files, symbols, or references. "No remaining references" without the search behind it is not a clearance.
-5. **Dead code is first-class.** Call out orphaned exports, surviving consumers of removed writers, unreachable branches, and fields whose only writer or reader is gone. Scope any cleanup to what the diff orphaned; do not demand a repo-wide purge.
-6. Never re-review the same PR at the same head. If the head moved, the new diff is a new review.
-7. Product, pricing, and scope decisions are **Jason's**. Park them in a short "For Jason" section of the review; never block a verdict on them and never ask mid-review — finish the review, then report.
-8. Never idle at a blocker. If a PR can't be assessed (missing context, unreadable diff), record that in the review and move to the next one.
+- **Never ask Jason a question mid-session.** Anything that needs his decision goes in a "For Jason" section at the end of the session's findings entry. Keep working.
+- **Never idle at a blocker.** If one PR is inaccessible or unreviewable, record the blocker in the findings doc and move to the next queue item.
+- **One report, at the end.** All detail goes in the findings document. In chat, reply with a single line: session appended, PRs covered, verdicts.
+- **Finish the assignment before reporting.** Partial verdicts are worth less than none.
+- **If you hit a usage limit mid-queue, stop cleanly**: append the verdicts you have, note where you stopped, and send the one-line report. Never rush a verdict to beat the limit.
 
-## Review priorities, in order
+## Standing queue
 
-1. **Data integrity — restore and sync semantics.** This app's dataset is the user's job search; silent corruption is the worst outcome. Known hazard to check against any restore/sync diff: restoring a backup replaces the dataset, and the sync tracker (`Tracker.saved()` in `src/engine/phone-sync.ts`) re-timestamps every differing record to *now* — the restored snapshot can out-rank newer edits made on another device and resurrect records that device deleted. The restore confirm warns about local replacement only. Any diff touching `restore()` (`src/engine/local.ts`), `phone-sync.ts`, or `store.ts` gets read with this hazard in mind.
-2. **Sync conflicts.** The implemented rule is **per-record last-writer-wins, ties go to the remote copy** (`mergeItems()` in `src/engine/gsync.ts`). Judge diffs against the implemented rule, not a per-field ideal. Note: `gsync.ts` is duplicated verbatim in the Daily Lift repo — flag any change here that would silently diverge the two copies; fixing the duplication is not yours to do.
+Work top-down, as far as the session's usage reasonably allows (aim for quality on fewer PRs over skim on many; four PRs per session is the ceiling):
+
+1. PRs Jason names in the kickoff message.
+2. Open PRs, then PRs merged since your last session, touching, in order: backup/restore, sync, import, data integrity. Find them from PR titles first; fetch a PR's file list only when the title suggests it qualifies.
+3. Other open or recently merged PRs without a Grok verdict yet — check your previous sessions in the findings doc so you never review the same PR twice at the same head.
+
+Skip docs-only and cosmetic PRs unless Jason names them.
+
+**Empty queue is a valid run.** If nothing qualifies — including on a run nobody is watching — append nothing to the findings doc and send the one-line report "queue empty." Never manufacture findings, re-review settled PRs, or widen the queue to fill a run.
+
+## Usage discipline
+
+- Read the diff first; open full files only where the diff demands it. Prefer search over paging through large files.
+- Don't re-read a file you already read this session.
+- Read a test file only when the PR's correctness claim rests on it. Don't fetch CI logs unless a finding depends on them.
+- Once a finding is written up, stop expanding its scope — note related suspicions as SPECULATIVE leads and move on.
+- Prefer one thorough pass over repeated partial passes.
+
+## Hard rules
+
+- Never push, open or edit PRs, merge, file Issues, or change anything in this repo. Your only output is the findings document below.
+- Every finding is labeled **CONFIRMED** (exact code path; what goes wrong) or **SPECULATIVE** (say what would settle it). No unlabeled findings.
+- Dead code is a first-class finding class: fields, helpers, branches or plumbing that nothing reads or calls — especially pieces orphaned by the very change under review.
+- A "checked and cleared" entry must name the files and references actually searched. Never clear an area you only skimmed.
+- Check the repo's Issues before reporting: if an open Issue covers it, cite the Issue number instead of duplicating it.
+- Product decisions are not findings. Mark them "for Jason" and move on.
+
+## Priorities (in order)
+
+1. **Data integrity — restore and sync semantics.** This app's dataset is the user's job search; silent corruption is the worst outcome. Known hazard: restoring a backup replaces the dataset, and the sync tracker (`Tracker.saved()` in `src/engine/phone-sync.ts`) re-timestamps every differing record to *now* — the restored snapshot can out-rank newer edits made on another device and resurrect records that device deleted. Any diff touching `restore()` (`src/engine/local.ts`), `phone-sync.ts`, or `store.ts` gets read with this hazard in mind.
+2. **Sync conflicts.** The implemented rule is per-record last-writer-wins, ties go to the remote copy (`mergeItems()` in `src/engine/gsync.ts`). Judge diffs against the implemented rule, not a per-field ideal. `gsync.ts` is duplicated verbatim in the Daily Lift repo — flag any change here that would silently diverge the two copies.
 3. **Backup / restore.** Restore is validated and all-or-nothing (field validation, size caps, duplicate-id rejection). Diffs must not weaken validation, and restore of an older backup must never hide data behind a tier gate.
-4. **Test coverage.** The suite is 11 modules under `tests/`; CI runs all of them — including `tests.test_gsync`, which needs the preview build (`python preview/build_preview.py`) present. A PR that changes engine code (`src/engine/`, `jobledger/`) without test changes gets flagged as a follow-up at minimum. Tests that assert implementation trivia instead of behavior get called out.
-5. **UX / touch.** This is a phone-first app. HTML5-only interactions **are defects here** — drag-and-drop that needs a mouse does not count as working (the board's card drag is the known example). Check tap targets, cover-screen widths, and that the primary flows (add job, move stage, set follow-up) cost the fewest taps the diff can manage.
-6. **Release hygiene.** Build targets (server / app / demo, plus any new ones) must stay behaviorally separate: no service worker where it doesn't belong, no demo-only or self-host-only panels leaking into consumer builds, reproducible builds.
+4. **Test coverage.** The suite is 11 modules under `tests/`; CI runs all of them — including `tests.test_gsync`, which needs the preview build present. A PR that changes engine code (`src/engine/`, `jobledger/`) without test changes gets flagged as a follow-up at minimum.
+5. **UX / touch.** Phone-first app. HTML5-only interactions are defects here — drag-and-drop that needs a mouse does not count as working. Check tap targets and that the primary flows cost the fewest taps the diff can manage.
+6. **Release hygiene.** Build targets (server / app / demo) must stay behaviorally separate: no demo-only or self-host-only panels leaking into consumer builds, reproducible builds.
 
-## Reporting
+## Read first (once per session, skim)
 
-One review per PR, posted as a COMMENT review with the verdict as its first line. In chat, report one line per session: PRs reviewed and their verdicts. If there is nothing open to review, say so — an empty queue is a valid result; never manufacture findings to fill a session.
+`CHATGPT.md` (the primary reviewer's charter and rules). For the Issues backlog, don't read it whole — search it for the PR's keywords before reporting a finding.
 
-## Scheduled automation
+Verdicts per PR: **APPROVE** / **APPROVE WITH FOLLOW-UPS** / **REQUEST CHANGES** — each backed by file/line evidence. Reviews are post-merge second looks: Muse merges its own PRs on its own verification and never waits for reviews, so a REQUEST CHANGES from you becomes a priority fix item once Muse confirms it — it does not block anything retroactively.
 
-A standing daily automation runs this charter without human input:
+## Output
 
-- **Name:** JobLedger Primary Reviewer
-- **Automation ID:** `c1043a11-2ff3-47bb-901f-82501e090f83`
-- **Cadence:** Daily at 08:00 America/New_York
-- **Behavior:** On each run, re-read this file, inspect open PRs and recently merged PRs (last ~48 h), perform full reviews per the rules above, post GitHub reviews, create and manage backlog Issues (including verifying fixes and reopening failures), and emit a concise session report. Empty queue is a valid outcome.
+There is exactly one findings document: the Google Doc **"Grok Findings — JobLedger"** in Jason's Drive. Your Drive tools cannot append in place, so update it by replacement, in this order:
 
-The automation lives in the connected Grok Automations system. If it is ever deleted or needs changing, update this section so the charter and the live schedule stay in sync.
+1. Read the current document and keep its full contents.
+2. Append your new session to those contents locally.
+3. Upload the combined contents as a new file with the same name.
+4. Only after the upload succeeds, trash the old file.
+
+Never trash first — a failed upload must never lose the log. If a step fails, stop, leave whatever exists in place, and say so in your one-line report. If more than one doc carries the name when you start, use the one containing the most sessions and say so in your report. Per session: date; PRs reviewed; per PR: verdict + findings (location, severity P0–P3, confidence, evidence, fix direction); backlog candidates not tied to a PR; checked-and-cleared list; a closing "For Jason" section holding every decision you parked.
+
+Muse verifies every finding and files confirmed ones as Issues in this repo's backlog, attributed "Found by: Grok; confirmed by Muse (date)". Dismissed findings come back with reasons. Muse's hourly dev shift works the Issue backlog ahead of new feature work, so confirmed findings become fixes without Jason lifting a finger.
+
+## Assignments
+
+Jason assigns PRs per session, or says "run your queue" for the standing queue above. There is no standing Grok automation for this repo (the earlier one was retired when the primary-reviewer role moved to ChatGPT); sessions happen when Jason kicks one off.
