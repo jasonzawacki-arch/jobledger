@@ -331,7 +331,7 @@ function dataView(): string {
       <h3>Restore from a backup</h3>
       <p class="hint" style="margin:0">Restoring replaces all current jobs and history with the file's contents.</p>
       <label class="f"><span class="sr">Backup file</span><input type="file" accept="application/json,.json" data-restore-file></label>
-      ${pr ? `<div class="confirm" role="alert"><span>Replace everything with this backup (${pr.jobs.length} jobs)?</span><button class="btn danger" data-restore-yes>Replace my data</button><button class="btn" data-restore-no>Cancel</button></div>` : ''}
+      ${pr ? `<div class="confirm" role="alert"><span>Replace everything with this backup (${pr.jobs.length} jobs)?${gsync()?.state.on ? ' <b>Sync is on:</b> the restored file replaces the data on this device only. The next sync reconciles with your Drive copy — newer changes from your other devices win over the restored file, and jobs deleted there stay deleted. Restoring never pushes the backup over newer synced changes.' : ''}</span><button class="btn danger" data-restore-yes>Replace my data</button><button class="btn" data-restore-no>Cancel</button></div>` : ''}
       ${S.error ? `<p class="err" role="alert">${esc(S.error)}</p>` : ''}
     </section>
     <form class="panel" data-resume-form><h3>Your resume</h3>
