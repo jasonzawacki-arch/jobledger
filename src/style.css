@@ -148,7 +148,28 @@ mark { background: var(--accent-soft); color: var(--ink); border-radius: 4px; pa
 .fu:first-of-type { border-top: 0; }
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 20px); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; max-width: calc(100% - 32px); }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
-@media (max-width: 560px) { .strip div { flex-direction: column-reverse; align-items: flex-start; gap: 0; padding: 6px 7px 7px; } .strip span { font-size: 10.5px; } .hero h2 { font-size: 23px; } .step { font-size: 11.5px; } }
+@media (max-width: 560px) { .strip div { flex-direction: column-reverse; align-items: flex-start; gap: 0; padding: 6px 7px 7px; } .hero h2 { font-size: 23px; }
+  /* Req. 12 (U-1): primary controls reach 44px touch height at phone widths only —
+     desktop/server UI above 560px is untouched */
+  .tab { min-height: 44px; display: inline-flex; align-items: center; }
+  .btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  .step { min-height: 44px; padding-block: 8px; }
+  .back { min-height: 44px; display: inline-flex; align-items: center; }
+  input, select { min-height: 44px; }
+  /* Req. 12 (U-2): the board snaps one column at a time; the stage strip above doubles as the column jumper.
+     Note: plain 82vw tracks, not minmax(0, 82vw) — the Chromium build under test collapses
+     vw-inside-minmax() tracks to the fr share, while the definite length sizes correctly. */
+  .board { scroll-snap-type: x mandatory; grid-template-columns: repeat(5, 82vw); }
+  .col { scroll-snap-align: start; }
+  .strip div[data-jump] { cursor: pointer; }
+  .strip div[data-jump]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Req. 12 (U-3): small-text floor — 12px labels, 13px hints — at phone widths */
+  .strip span { font-size: 12px; }
+  .step { font-size: 12px; }
+  .mono { font-size: 12px; }
+  .tl .kind { font-size: 12px; }
+  .wk small { font-size: 12px; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 /* Liquid glass: translucent layers over soft color fields, bright edge light on top, blur behind */
