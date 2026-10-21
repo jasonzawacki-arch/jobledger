@@ -1,13 +1,14 @@
 import { api, ApiError, getAiKey, getToken, setAiKey, setToken } from './api';
+import { FREE_JOB_CAP, isPro } from './pro';
 import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, SOURCES, STAGES } from './types';
 import { calLink, esc, userTimeZone, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
 
-/** Which build this is: served by the Python server, the installable phone app, or the demo. */
-const BUILD: 'server' | 'phone' | 'demo' = ((window as unknown as { __JL_MODE__?: string }).__JL_MODE__ as 'phone' | 'demo') || 'server';
+/** Which build this is: served by the Python server, the installable phone app, the demo, or the Play build. */
+const BUILD: 'server' | 'phone' | 'demo' | 'play' = ((window as unknown as { __JL_MODE__?: string }).__JL_MODE__ as 'phone' | 'demo' | 'play') || 'server';
 /** The JobLedger server the phone app is connected to, if any. */
 const REMOTE: string = (window as unknown as { __JL_REMOTE__?: string }).__JL_REMOTE__ || '';
-/** Where the data lives: 'server' (a JobLedger server), 'phone' (saved on this device) or 'demo' (sample data, not saved). */
-const MODE: 'server' | 'phone' | 'demo' = BUILD === 'phone' && REMOTE ? 'server' : BUILD;
+/** Where the data lives: 'server' (a JobLedger server), 'phone' (saved on this device), 'demo' (sample data, not saved) or 'play' (the Play build's device storage). */
+const MODE: 'server' | 'phone' | 'demo' | 'play' = BUILD === 'phone' && REMOTE ? 'server' : BUILD;
 type View = 'board' | 'job' | 'pulse' | 'data';
 interface State {
   view: View; jobs: Job[]; sel: number | null; detail: Job | null; pulse: Pulse | null; match: Match | null; resume: string;
@@ -97,7 +98,8 @@ function boardResults(): string {
 function board(): string {
   const search = S.jobs.length
     ? `<label class="search"><span class="sr">Search jobs</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input type="search" data-search placeholder="Search company, title, notes, people" value="${esc(S.query)}" autocomplete="off" enterkeyhint="search"></label>` : '';
-  return `<div class="row toolbar">${search}<button class="btn pri" data-add>Add job</button></div>
+  const proHint = BUILD === 'play' && !isPro() ? `<span class="hint mono" style="margin:0 0 0 8px" role="status">Free tier: ${S.jobs.length}/${FREE_JOB_CAP} applications</span>` : '';
+  return `<div class="row toolbar">${search}<button class="btn pri" data-add>Add job</button>${proHint}</div>
     <p class="hint" style="margin:0 0 10px">Drag a card to another column to move it, or tap it to open.</p>${S.form === 'add' ? jobForm(null) : ''}
     ${S.jobs.length === 0 && S.loaded ? '<div class="empty" style="margin-bottom:12px">Nothing tracked yet. Add your first job to get started.</div>' : ''}
     <div data-results>${boardResults()}</div>`;
@@ -236,7 +238,7 @@ function suggestUi(req: string): string {
 function matchPanel(): string {
   const m = S.match;
   const shield = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>';
-  const aiHint = getAiKey() ? '' : ' Optional: add your own Anthropic API key on the Data tab to get wording suggestions.';
+  const aiHint = getAiKey() || BUILD === 'play' ? '' : ' Optional: add your own Anthropic API key on the Data tab to get wording suggestions.';
   const note = `<div class="guard">${shield}<span>Matching compares words only. It shows lines copied from your own resume as evidence and never writes or adds anything, so it cannot invent experience. A "Match" means shared wording, not a promise you qualify.${aiHint}</span></div>`;
   let inner: string;
   if (!m || !m.has_posting) inner = '<div class="empty">Paste the posting text with <b>Edit details</b> to see how it lines up with your resume.</div>';
@@ -297,10 +299,10 @@ function wherePanel(): string {
 type GSyncState = { on: boolean; email: string; last: number; busy: boolean; tap: boolean; choose: boolean; msg: string };
 type GSync = { state: GSyncState; link(): Promise<void>; now(tap?: boolean): Promise<void>; off(): void; choose(h: string): Promise<void> };
 const gsync = (): GSync | undefined => (window as unknown as { __JL_SYNC__?: GSync }).__JL_SYNC__;
-/** Optional Google Drive sync (phone app with data on the device). */
+/** Optional Google Drive sync (phone app with data on the device). Hidden in the Play build until Drive sync returns (Req. 6). */
 function syncPanel(): string {
   const G = gsync();
-  if (!G || MODE !== 'phone') return '';
+  if (!G || MODE !== 'phone' || BUILD === 'play') return '';
   const s = G.state, when = s.last ? new Date(s.last).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'not yet';
   const body = !s.on
     ? `<p class="hint" style="margin:0">Optional. Keep JobLedger the same on your phone and computer: sign in with a Google account and JobLedger keeps a copy in a private app folder in your Google Drive. The app works fully without it.</p>
@@ -320,6 +322,7 @@ function dataView(): string {
     <section class="panel"><h3>Your data</h3>
       <p class="hint" style="margin:0">${MODE === 'server' ? (REMOTE ? `Everything lives on your JobLedger server at ${esc(REMOTE)}.` : 'Everything lives in a SQLite file on the machine running the server. Nothing is sent anywhere.')
         : MODE === 'phone' ? 'Everything is saved on this device, in this browser. Nothing is sent anywhere. Download a backup now and then: it is your copy if the phone is lost or the browser data is cleared, and the JobLedger server on a computer can restore it too.'
+        : MODE === 'play' ? 'Everything is saved in the app on this device. Nothing is sent anywhere. Download a backup now and then: it is your copy if the phone is lost or the app data is cleared.'
         : 'This is a preview with sample data. Changes stay on this page until you reload, and nothing is saved.'}</p>
       <div class="btns"><button class="btn" data-export-csv>Export CSV</button><button class="btn" data-backup>Download backup (JSON)</button></div>
       <h3>Follow-up reminders</h3>
@@ -338,17 +341,17 @@ function dataView(): string {
       <p class="hint" style="margin:0">Paste your resume, one accomplishment per line (bullets are fine). It is stored only in your database and is used for matching on each job.</p>
       <label class="f"><span class="sr">Resume text</span><textarea name="text" rows="9" maxlength="40000">${esc(S.resume)}</textarea></label>
       <div class="btns"><button class="btn pri" type="submit">Save resume</button></div></form>
-    <form class="panel" data-key-form><h3>Wording suggestions (optional)</h3>
+    ${BUILD === 'play' ? '' : `<form class="panel" data-key-form><h3>Wording suggestions (optional)</h3>
       <p class="hint" style="margin:0">Off by default and free. If you add your own Anthropic API key, a button appears under each matched requirement that asks Claude to reword that one resume line. Each suggestion costs a fraction of a cent on your own account. The key is kept in this browser and sent only with those requests.</p>
       <label class="f">API key<input name="key" type="password" autocomplete="off" placeholder="${getAiKey() ? 'A key is saved in this browser' : 'sk-ant-…'}"></label>
-      <div class="btns"><button class="btn pri" type="submit">Save key</button>${getAiKey() ? '<button class="btn" type="button" data-key-remove>Remove key</button>' : ''}</div></form>
+      <div class="btns"><button class="btn pri" type="submit">Save key</button>${getAiKey() ? '<button class="btn" type="button" data-key-remove>Remove key</button>' : ''}</div></form>`}
     <section class="panel"><h3>Appearance</h3>
       <label class="f">Theme<select data-theme>${['system', 'light', 'dark'].map((t) => `<option value="${t}" ${t === theme ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
       ${getToken() ? '<div class="btns"><button class="btn" data-signout>Forget access token</button></div>' : ''}
-      <h3>Install on your phone</h3>
+      ${BUILD === 'play' ? '' : `<h3>Install on your phone</h3>
       <p class="hint" style="margin:0">${MODE === 'phone' ? 'In Chrome on Android, open the menu (three dots) and tap Install app. JobLedger then gets its own icon and works offline, with your data kept on the phone.'
         : MODE === 'demo' ? 'The phone app is this same interface, saving your real data on the phone. Open the JobLedger app link from the README in Chrome on Android, then tap Install app in the menu.'
-        : 'When this page is opened over HTTPS, Chrome on Android offers Install app, which gives JobLedger its own icon. The easy way: install Tailscale on your computer and phone, then start JobLedger with <code>python -m jobledger --tailscale</code>. It prints a private https address only your own devices can open.'}</p>
+        : 'When this page is opened over HTTPS, Chrome on Android offers Install app, which gives JobLedger its own icon. The easy way: install Tailscale on your computer and phone, then start JobLedger with <code>python -m jobledger --tailscale</code>. It prints a private https address only your own devices can open.'}</p>`}
     </section></div>`;
 }
 function gate(): string {
@@ -636,7 +639,8 @@ window.addEventListener('jobledger:data', () => { void reload(); });
 window.addEventListener('jobledger:save-failed', () => toast('This browser would not save your change. Check that it has storage space, then download a backup.'));
 
 /* ---------- start */
-if (MODE !== 'demo' && 'serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+// The Play build registers no service worker (Req. 1); Capacitor serves the bundle itself.
+if (MODE !== 'demo' && MODE !== 'play' && 'serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* optional */ });
 }
 (async () => {
