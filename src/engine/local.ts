@@ -124,6 +124,9 @@ export class Engine {
   private now: () => number;
   private outside?: typeof fetch;
   private uniqueIds: () => boolean;
+  /** Set by the /api/restore route on the save that persists a restore, so the host (phone setup) can
+   * tell the sync tracker the restored records are historical, not fresh edits. Consumed by changed(). */
+  restoredSync = false;
 
   constructor(data: Data, opts: Options = {}) {
     this.d = data;
@@ -619,7 +622,7 @@ export class Engine {
     }
   }
 
-  private changed<T>(value: T, status = 200): Reply { this.save(this.d); return { status, json: value }; }
+  private changed<T>(value: T, status = 200): Reply { this.save(this.d); this.restoredSync = false; return { status, json: value }; }
 
   private async route(method: string, path: string, q: URLSearchParams, body: unknown, headers: Headers): Promise<Reply> {
     const sandbox = (what: string): never => { throw new Bad(`${what} needs the full app. In the preview, try the Google Calendar buttons instead.`); };
@@ -639,7 +642,7 @@ export class Engine {
     }
     if (path === '/api/posting') throw new Bad('Fill from link needs the JobLedger server on your computer, because a phone app cannot read other websites. Paste the posting text instead.');
     if (path === '/api/import') { if (this.demo) sandbox('Importing a file'); const t = (body as { csv?: unknown } | null)?.csv; return this.changed(this.importCsv(t), 201); }
-    if (path === '/api/restore') { if (this.demo) sandbox('Restoring a backup'); return this.changed(this.restore(body)); }
+    if (path === '/api/restore') { if (this.demo) sandbox('Restoring a backup'); const c = this.restore(body); this.restoredSync = true; return this.changed(c); }
     if (path === '/api/export.csv') { if (this.demo) sandbox('Downloading files'); return { status: 200, text: this.exportCsv(), type: 'text/csv', filename: 'jobledger.csv' }; }
     if (path === '/api/backup') { if (this.demo) sandbox('Downloading files'); return { status: 200, text: JSON.stringify(this.backup()), type: 'application/json', filename: 'jobledger-backup.json' }; }
     if (path === '/api/calendar.ics') { if (this.demo) sandbox('Downloading files'); return { status: 200, text: this.calendar(null), type: 'text/calendar', filename: 'jobledger-follow-ups.ics' }; }
