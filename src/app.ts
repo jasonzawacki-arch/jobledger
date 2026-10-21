@@ -128,6 +128,7 @@ function jobForm(j: Job | null): string {
       ${j ? '' : `<label class="f">Starting stage<select name="stage">${STAGES.slice(0, 2).map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select></label>`}
     </div>
     <label class="f">Posting text or notes about the role<textarea name="description" maxlength="60000">${v('description')}</textarea></label>
+    ${MODE === 'server' ? '' : `<div class="btns" style="margin-top:-6px"><button class="btn" type="button" data-paste-posting>Paste from clipboard</button></div><p class="hint" style="margin:0 0 10px">On the phone app, paste the posting text — matching runs on it.</p>`}
     ${S.error ? `<p class="err" role="alert">${esc(S.error)}</p>` : ''}
     <div class="btns"><button class="btn pri" type="submit">${j ? 'Save changes' : 'Add job'}</button><button class="btn" type="button" data-cancel-form>Cancel</button></div></form>`;
 }
@@ -400,7 +401,7 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-paste-posting],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to]');
   if (!t) return;
   const d = t.dataset;
   if (d.move !== undefined) { // Req. 9: toggle the per-card Move menu (board)
@@ -471,6 +472,14 @@ document.addEventListener('click', async (ev) => {
   else if (d.usePhone !== undefined) { (window as unknown as { __JL_CONNECT__?: { useThisPhone: () => void } }).__JL_CONNECT__?.useThisPhone(); location.reload(); return; }
   else if (d.delInterview && S.sel !== null) { const j = await guard(() => api.delInterview(S.sel!, Number(d.delInterview))); if (j) { setDetail(j); toast('Interview removed.'); await reload(); } return; }
   else if (d.fillLink !== undefined) { await fillFromLink(t as HTMLButtonElement); return; }
+  else if (d.pastePosting !== undefined) {
+    const ta = t.closest('form')?.querySelector('textarea[name=description]') as HTMLTextAreaElement | null;
+    if (ta) {
+      try { ta.value = (await navigator.clipboard.readText()).slice(0, 60000); toast('Pasted.'); }
+      catch { toast('Clipboard is blocked — tap the field and paste manually.'); }
+    }
+    return;
+  }
   else if (d.ics !== undefined && S.sel !== null) { await guard(() => api.download(`/api/jobs/${S.sel}/calendar.ics?tz=${encodeURIComponent(userTimeZone())}`, `jobledger-follow-up-${S.sel}.ics`)); return; }
   else if (d.icsAll !== undefined) {
     if (!S.jobs.some((j) => !j.closed_reason && j.reminder_on)) { toast('No open jobs have a follow-up yet.'); return; }
