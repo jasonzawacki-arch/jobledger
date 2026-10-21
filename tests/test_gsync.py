@@ -3,6 +3,7 @@ not offered without a client ID or in the demo, turn on, jobs sync between devic
 records from two devices with the same id are renumbered on the first Combine, and expired access shows a Sync
 button. Skipped when Playwright or the built files are missing."""
 import json, os, re, unittest
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 from tests.test_phone import APP, ROOT, Static, sync_playwright
@@ -156,6 +157,52 @@ class GoogleDriveSync(unittest.TestCase):
         # Gamma's own history moved with it
         c.click(".card >> text=Gamma"); c.wait_for_selector(".tl")
         self.assertIn("Saved the posting", c.inner_text(".tl"))
+        self.assertEqual(self.errors, [])
+
+    def test_restore_does_not_clobber_newer_synced_changes(self):
+        a = self.device()
+        self.add(a, "Acme"); self.add(a, "Zeta")
+        self.turn_on(a)
+        b = self.device()
+        self.turn_on(b)
+        bboard = self.board(b)
+        self.assertIn("Acme", bboard); self.assertIn("Zeta", bboard)
+        # an older backup of A, taken before B's changes
+        a.click("[data-view=data]")
+        with a.expect_download() as dl:
+            a.click("[data-backup]")
+        old_backup = Path(dl.value.path())
+
+        # B edits Acme and deletes Zeta, then syncs
+        b.click(".card >> text=Acme"); b.click("[data-edit]")
+        b.fill("textarea[name=description]", "B's newer posting text")
+        b.click("form[data-form=edit] button[type=submit]")
+        b.wait_for_selector(".hero h2")
+        b.click("[data-go=board]")
+        b.click(".card >> text=Zeta"); b.click("[data-delete]"); b.click("[data-delete-yes]")
+        b.wait_for_timeout(5500)
+        self.assertIn("B's newer posting text", json.dumps(self.drive.items()["jobs:1"]))
+        self.assertIsNone(self.drive.items()["jobs:2"]["v"])  # Zeta's deletion reached Drive
+
+        # A restores the older backup with sync on: the confirm must warn about reconciliation
+        a.click("[data-view=data]")
+        a.set_input_files("[data-restore-file]", str(old_backup))
+        confirm = a.inner_text("div.confirm")
+        self.assertIn("Sync is on", confirm)
+        self.assertIn("newer changes from your other devices win", confirm)
+        a.click("[data-restore-yes]")
+        a.wait_for_selector("#toast >> text=Restored")
+        # the restore schedules no sync and pushes nothing: Drive is untouched
+        self.assertIn("B's newer posting text", json.dumps(self.drive.items()["jobs:1"]))
+        self.assertIsNone(self.drive.items()["jobs:2"]["v"])
+
+        # A syncs: per-record last-writer-wins — B's newer Acme wins, Zeta stays deleted
+        self.sync_now(a)
+        self.assertIn("B's newer posting text", json.dumps(self.drive.items()["jobs:1"]))
+        self.assertIsNone(self.drive.items()["jobs:2"]["v"])
+        board = self.board(a)
+        self.assertIn("Acme", board)
+        self.assertNotIn("Zeta", board)
         self.assertEqual(self.errors, [])
 
     def test_expired_access_shows_sync_button(self):
