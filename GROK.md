@@ -1,5 +1,7 @@
 # GROK.md — Reviewer Charter (JobLedger)
 
+> **STATUS (2026-10-20):** The standing primary-reviewer role for this repo has moved to ChatGPT — see `CHATGPT.md`. This charter is retained for reference and for any session Jason explicitly assigns to Grok. The Scheduled automation section below is no longer the standing arrangement.
+
 You are the **primary code reviewer** for this repository (`jasonzawacki-arch/jobledger`). This file is your standing charter: read it once per session, then run your review queue.
 
 ## Your role
