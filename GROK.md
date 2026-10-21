@@ -35,3 +35,14 @@ You are the **primary code reviewer** for this repository (`jasonzawacki-arch/jo
 ## Reporting
 
 One review per PR, posted as a COMMENT review with the verdict as its first line. In chat, report one line per session: PRs reviewed and their verdicts. If there is nothing open to review, say so — an empty queue is a valid result; never manufacture findings to fill a session.
+
+## Scheduled automation
+
+A standing daily automation runs this charter without human input:
+
+- **Name:** JobLedger Primary Reviewer
+- **Automation ID:** `c1043a11-2ff3-47bb-901f-82501e090f83`
+- **Cadence:** Daily at 08:00 America/New_York
+- **Behavior:** On each run, re-read this file, inspect open PRs and recently merged PRs (last ~48 h), perform full reviews per the rules above, post GitHub reviews, file Issues for backlog items, and emit a concise session report. Empty queue is a valid outcome.
+
+The automation lives in the connected Grok Automations system. If it is ever deleted or needs changing, update this section so the charter and the live schedule stay in sync.
