@@ -1,7 +1,13 @@
 """Google Drive sync in the phone app, against a stand-in for Google (sign-in and Drive are faked in the browser):
 not offered without a client ID or in the demo, turn on, jobs sync between devices both ways, deletes travel,
-records from two devices with the same id are renumbered on the first Combine, and expired access shows a Sync
-button. Skipped when Playwright or the built files are missing."""
+records from two devices with the same id are renumbered on the first Combine, conflicting edits resolve
+per-record last-writer-wins (ties go to the remote copy, as mergeItems() implements), and expired access shows
+a Sync button. Skipped when Playwright or the built files are missing.
+
+Standalone-run prerequisite: the demo check in test_not_offered_without_client_id_or_in_demo loads
+`demo/` served next to the phone app, and that folder only exists after `python preview/build_preview.py`
+(which itself needs `npm run build` first). Run `npm run build && python preview/build_preview.py` before
+running this module on its own. CI's browser job does exactly that, then runs this module with the others."""
 import json, os, re, unittest
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -73,10 +79,13 @@ class GoogleDriveSync(unittest.TestCase):
         for c in self.ctxs:
             c.close()
 
-    def device(self, client=True, exp=3600, base=None):
+    def device(self, client=True, exp=3600, base=None, pin=None):
         ctx = self.browser.new_context(viewport={"width": 390, "height": 844})
         self.ctxs.append(ctx)
-        ctx.add_init_script(f"window.GSYNC_CLIENT_ID='test-client';window.__expIn={exp};" if client else "window.GSYNC_CLIENT_ID='';")
+        init = f"window.GSYNC_CLIENT_ID='test-client';window.__expIn={exp};" if client else "window.GSYNC_CLIENT_ID='';"
+        if pin is not None:
+            init = f"window.__pin={pin};Date.now=()=>window.__pin;" + init  # frozen clock, advanced by hand
+        ctx.add_init_script(init)
         ctx.route("https://accounts.google.com/gsi/client", lambda r: r.fulfill(status=200, content_type="text/javascript", body=FAKE_GSI))
         ctx.route(re.compile(r"^https://www\.googleapis\.com/.*"), self.drive.route)
         ctx.route("**/api/**", lambda r: r.abort())  # never a JobLedger server
@@ -105,6 +114,16 @@ class GoogleDriveSync(unittest.TestCase):
     def sync_now(self, pg):
         pg.click("[data-view=data]")
         pg.click("[data-gs-now]"); pg.wait_for_timeout(1200)
+
+    def set_remote(self, key, t, v):
+        """Rewrite one record in the fake Drive file, as if another device had synced it."""
+        for f in self.drive.files.values():
+            if f["name"] == "jobledger-sync.json":
+                doc = json.loads(f["body"])
+                doc["items"][key] = {"t": t, "v": v}
+                f["body"] = json.dumps(doc)
+                return
+        raise AssertionError("no sync file in the fake Drive")
 
     def test_not_offered_without_client_id_or_in_demo(self):
         pg = self.device(client=False)
@@ -203,6 +222,40 @@ class GoogleDriveSync(unittest.TestCase):
         board = self.board(a)
         self.assertIn("Acme", board)
         self.assertNotIn("Zeta", board)
+        self.assertEqual(self.errors, [])
+
+    def test_conflicting_edits_resolve_per_record_lww_tie_goes_remote(self):
+        PIN1, PIN2 = 2000000000000, 2000000060000
+        a = self.device(pin=PIN1)
+        self.add(a, "Acme")
+        self.turn_on(a)
+        a.wait_for_timeout(1500)  # first sync uploads the starting records
+        a.click("[data-view=board]")  # turn_on leaves the page on the Data view
+        a.evaluate(f"window.__pin={PIN2}")  # time moves on, so the edit below out-ranks the upload
+        a.click(".card >> text=Acme"); a.click("[data-edit]")
+        a.fill("textarea[name=description]", "local text")
+        a.click("form[data-form=edit] button[type=submit]")
+        a.wait_for_timeout(5500)  # auto-sync pushes the edit; its change time is PIN2
+        rec = self.drive.items()["jobs:1"]
+        self.assertEqual(rec["t"], PIN2)
+        self.assertEqual(rec["v"]["description"], "local text")
+
+        # The other device synced an OLDER edit to the same record: this device wins,
+        # and the merged (local) version is pushed back up to Drive.
+        old = dict(rec["v"]); old["description"] = "remote older text"
+        self.set_remote("jobs:1", PIN2 - 30000, old)
+        self.sync_now(a)
+        rec = self.drive.items()["jobs:1"]
+        self.assertEqual(rec["t"], PIN2)
+        self.assertEqual(rec["v"]["description"], "local text")
+
+        # A tie on the change time: the remote copy wins, and this device applies it locally.
+        tie = dict(self.drive.items()["jobs:1"]["v"]); tie["description"] = "remote tie text"
+        self.set_remote("jobs:1", PIN2, tie)
+        self.sync_now(a)
+        a.click("[data-view=board]")  # sync_now leaves the page on the Data view
+        a.click(".card >> text=Acme"); a.click("[data-edit]")
+        self.assertEqual(a.input_value("textarea[name=description]"), "remote tie text")
         self.assertEqual(self.errors, [])
 
     def test_expired_access_shows_sync_button(self):
