@@ -137,3 +137,24 @@ class Play(unittest.TestCase):
             self.assertFalse(self.errors, self.errors)
         finally:
             site.stop()
+
+
+PRIVACY = ROOT / "dist" / "app" / "privacy.html"
+
+
+@unittest.skipUnless(PRIVACY.exists(), "needs `npm run build`")
+class PrivacyPage(unittest.TestCase):
+    """The Play listing's privacy policy must ship with the hosted phone app
+    (Pages uploads dist/app, so it lands at /jobledger/privacy.html). §6 item 13."""
+
+    def test_published_and_names_egress_paths(self):
+        text = PRIVACY.read_text(encoding="utf-8")
+        for claim in [
+            "No ads, no analytics, no tracking",
+            "stored on your phone",
+            "Add to Google Calendar",   # the one user-initiated network egress in the Play build
+            "no Google Drive sync",      # Req. 6: hidden in v1
+            "no wording-suggestion requests",  # N-5: API-key panel removed from Play
+        ]:
+            self.assertIn(claim, text, f"privacy page must state: {claim}")
+        self.assertNotIn("AI-powered", text)
