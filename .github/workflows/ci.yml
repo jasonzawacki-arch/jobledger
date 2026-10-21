@@ -31,4 +31,4 @@ jobs:
       - run: npm install && npm run build
       - run: pip install -r requirements.txt playwright && playwright install --with-deps chromium
       - run: python preview/build_preview.py
-      - run: python -m unittest tests.test_ui tests.test_phone tests.test_matcher_parity tests.test_gsync -v
+      - run: python -m unittest tests.test_ui tests.test_phone tests.test_matcher_parity tests.test_gsync tests.test_play -v
