@@ -1,13 +1,24 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   typescript:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
-        with: { node-version: 22 }
-      - run: npm install
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
       - run: npm run typecheck
       - run: npm run build
   python:
@@ -17,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with: { python-version: "${{ matrix.python }}" }
+        with: { python-version: "${{ matrix.python }}", cache: pip }
       - run: pip install -r requirements.txt
       - run: python -m unittest tests.test_service tests.test_api tests.test_rewrite tests.test_eval tests.test_main tests.test_posting tests.test_matcher -v
   browser:
@@ -25,10 +36,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
-        with: { node-version: 22 }
+        with: { node-version: 22, cache: npm }
       - uses: actions/setup-python@v6
-        with: { python-version: "3.13" }
-      - run: npm install && npm run build
-      - run: pip install -r requirements.txt playwright && playwright install --with-deps chromium
+        with: { python-version: "3.13", cache: pip }
+      - run: npm ci && npm run build
+      - run: pip install -r requirements.txt playwright
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-
+      - run: playwright install --with-deps chromium
       - run: python preview/build_preview.py
       - run: python -m unittest tests.test_ui tests.test_phone tests.test_matcher_parity tests.test_gsync tests.test_play -v
