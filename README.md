@@ -8,7 +8,7 @@ A private job application tracker. It needs no account, costs nothing to run and
 | **Server** | in a SQLite file on your computer or a cloud machine | Python 3.11+ and Node 18+ | yes |
 | **[Demo](https://jasonzawacki-arch.github.io/jobledger/demo/)** | nowhere: sample data, reset on reload | a browser | no |
 
-The phone app works on its own. It can also be pointed at your server (on your computer or in the cloud), and a backup file moves your data between them in either direction.
+The phone app works on its own. It can also be pointed at your server (on your computer or in the cloud), and a backup file moves your data between them in either direction. A fourth build, `dist/play`, packages the same phone app for Google Play (no service worker, no server/sync/API-key panels, Pro gate); it is a distribution variant of the phone app, not a separate mode.
 
 Privacy policy for the Android app: https://jasonzawacki-arch.github.io/jobledger/privacy.html
 
@@ -166,7 +166,7 @@ Rule tests use an injected clock, so "10 days idle" is tested without waiting. B
 - Schema is versioned with `PRAGMA user_version`; the app refuses to open a database from a newer version.
 - CSV cells that start with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets do not run them as formulas.
 - The UI escapes all text before rendering and only links http(s) addresses.
-- The UI is TypeScript compiled by a small dependency-free `build.mjs` into one HTML file, three times: for the server (`dist/index.html`), the phone app (`dist/app/`) and the demo (`dist/demo/`).
+- The UI is TypeScript compiled by a small dependency-free `build.mjs` into one HTML file, four times: for the server (`dist/index.html`), the phone app (`dist/app/`), the demo (`dist/demo/`) and the Google Play build (`dist/play/`).
 - The phone app and the demo use the phone engine (`src/engine/`), a TypeScript twin of the server's rules that answers the same `/api` requests inside the page, so the interface code is identical in all three. Its data is kept in backup format in the browser's IndexedDB. The matcher exists in both languages and a test keeps them identical; when you change a rule, change `service.py` and `src/engine/local.ts` together.
 - Other websites open in your browser cannot use the API. Writes from another origin are refused, request bodies must be `application/json` (which a plain form cannot send), and without a token the server only answers to `localhost`, `127.0.0.1` or names in `JL_HOSTS`, which blocks DNS rebinding.
 - The token is accepted only in the `Authorization` header, never in the URL, so it does not end up in logs or history.
