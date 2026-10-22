@@ -1,7 +1,10 @@
 name: phone app
 # Publishes the phone app (dist/app) and the demo (dist/app/demo) to GitHub Pages on every push to main.
 on:
-  push: { branches: [main] }
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
   workflow_dispatch:
 permissions: { contents: read, pages: write, id-token: write }
 concurrency: { group: pages, cancel-in-progress: true }
