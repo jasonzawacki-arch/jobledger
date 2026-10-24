@@ -376,6 +376,38 @@ class UI(unittest.TestCase):
         self.assertEqual(pg.locator("[data-col='2'] .card").count(), 1)
         self.assertEqual(self.errors, [])
 
+    def test_board_move_menu_keyboard_focus(self):
+        # Issue #19: render() replaces the board DOM; opening/closing the Move
+        # menu must not drop keyboard focus to <body>.
+        pg = self.page()
+        self.add(pg, "Acme Corp", "Data Analyst")  # Applied = stage 1, id is the only card
+        pg.focus("[data-move]")
+        self.assertTrue(pg.evaluate("document.activeElement.matches('[data-move]')"))
+        move_id = pg.get_attribute("[data-move]", "data-move")
+        pg.keyboard.press("Enter")
+        pg.wait_for_selector(".movemenu")
+        # Menu opens expanded and focus moves into it (first menu item), not to body.
+        self.assertEqual(pg.get_attribute("[data-move]", "aria-expanded"), "true")
+        self.assertFalse(pg.evaluate("document.activeElement === document.body"))
+        self.assertTrue(pg.evaluate("document.activeElement.matches('[data-move-to]')"))
+        self.assertEqual(pg.evaluate("document.activeElement.getAttribute('data-open')"), move_id)
+        # Escape closes the menu and returns focus to the same card's Move button.
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector(".movemenu", state="detached")
+        self.assertEqual(pg.get_attribute("[data-move]", "aria-expanded"), "false")
+        self.assertTrue(pg.evaluate("document.activeElement.matches('[data-move]')"))
+        self.assertEqual(pg.evaluate("document.activeElement.getAttribute('data-move')"), move_id)
+        # Selecting a stage from the keyboard also returns focus to that card's Move button.
+        pg.keyboard.press("Enter")
+        pg.wait_for_selector(".movemenu")
+        pg.evaluate("document.querySelector(\"[data-move-to='2']\").focus()")
+        pg.keyboard.press("Enter")
+        pg.wait_for_selector("[data-col='2'] .card >> text=Acme Corp")
+        pg.wait_for_selector(".movemenu", state="detached")
+        self.assertTrue(pg.evaluate("document.activeElement.matches('[data-move]')"))
+        self.assertEqual(pg.evaluate("document.activeElement.getAttribute('data-move')"), move_id)
+        self.assertEqual(self.errors, [])
+
     def test_touch_board_hint(self):
         # Req. 9: on touch devices the board hint must not describe drag-and-drop
         ctx = self.browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
