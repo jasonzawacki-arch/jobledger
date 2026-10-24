@@ -29,8 +29,9 @@ if (remote) {
     engine = new Engine(d, {
       save: (x) => {
         void save(x); keepData();
-        // A restore replaces the dataset with historical values: keep the old change times so the
-        // next sync reconciles per record (newer wins) instead of pushing the backup over Drive.
+        // A restore replaces the dataset with historical values: the tracker rebases their change
+        // times (clears them), so the next sync reconciles per record at t=0 — newer synced changes
+        // and deletions win, backup-only records are kept — instead of pushing the backup over Drive.
         if (engine.restoredSync) tracker.restored(x);
         else if (tracker.saved(x)) (window as unknown as { __JL_SYNC_CHANGED__?: () => void }).__JL_SYNC_CHANGED__?.();
       },
