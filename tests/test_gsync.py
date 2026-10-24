@@ -125,6 +125,24 @@ class GoogleDriveSync(unittest.TestCase):
                 return
         raise AssertionError("no sync file in the fake Drive")
 
+    def del_remote(self, key):
+        """Remove one record from the fake Drive file entirely, as if it had never been synced there."""
+        for f in self.drive.files.values():
+            if f["name"] == "jobledger-sync.json":
+                doc = json.loads(f["body"])
+                doc["items"].pop(key, None)
+                f["body"] = json.dumps(doc)
+                return
+        raise AssertionError("no sync file in the fake Drive")
+
+    def edit_description(self, pg, company, text):
+        pg.click("[data-view=board]")
+        pg.click(f".card >> text={company}"); pg.click("[data-edit]")
+        pg.fill("textarea[name=description]", text)
+        pg.click("form[data-form=edit] button[type=submit]")
+        pg.wait_for_selector(".hero h2")
+        pg.click("[data-go=board]")
+
     def test_not_offered_without_client_id_or_in_demo(self):
         pg = self.device(client=False)
         pg.click("[data-view=data]")
@@ -222,6 +240,73 @@ class GoogleDriveSync(unittest.TestCase):
         board = self.board(a)
         self.assertIn("Acme", board)
         self.assertNotIn("Zeta", board)
+        self.assertEqual(self.errors, [])
+
+    def test_restore_rebases_change_times_so_higher_prerestore_local_time_does_not_win(self):
+        # Issue #9 (reopened): A's last local edits are NEWER (PIN3) than B's remote
+        # edit/deletion (PIN2). Restoring A's older backup (PIN1) must not export the
+        # restored records at PIN3: B's newer edit and tombstone must win, while a
+        # backup-only record (Solo, absent from Drive) is kept and re-uploaded.
+        PIN1, PIN2, PIN3 = 2000000000000, 2000000060000, 2000000120000
+        a = self.device(pin=PIN1)
+        self.add(a, "Acme"); self.add(a, "Zeta"); self.add(a, "Solo")
+        self.turn_on(a)
+        a.wait_for_timeout(1500)  # first sync uploads the starting records at PIN1
+        items = self.drive.items()
+        self.assertEqual(sorted(k for k in items if k.startswith("jobs:")), ["jobs:1", "jobs:2", "jobs:3"])
+        for k in ("jobs:1", "jobs:2", "jobs:3"):
+            self.assertEqual(items[k]["t"], PIN1, k)
+
+        # a backup of A at PIN1, before B's changes
+        a.click("[data-view=data]")
+        with a.expect_download() as dl:
+            a.click("[data-backup]")
+        old_backup = Path(dl.value.path())
+
+        # B's state on Drive at PIN2: Acme edited, Zeta deleted, Solo never reached Drive
+        acme_b = dict(self.drive.items()["jobs:1"]["v"]); acme_b["description"] = "B's newer posting text"
+        self.set_remote("jobs:1", PIN2, acme_b)
+        self.set_remote("jobs:2", PIN2, None)
+        self.del_remote("jobs:3")
+        self.assertNotIn("jobs:3", self.drive.items())
+
+        # A's clock advances past B: local edits stamp jobs:1 and jobs:2 at PIN3.
+        # Do not wait for the auto-sync push; then re-apply B's PIN2 state so Drive
+        # deterministically holds it at restore time.
+        a.evaluate(f"window.__pin={PIN3}")
+        self.edit_description(a, "Acme", "A's later local edit")
+        self.edit_description(a, "Zeta", "A's later local edit")
+        self.set_remote("jobs:1", PIN2, acme_b)
+        self.set_remote("jobs:2", PIN2, None)
+        self.del_remote("jobs:3")
+
+        # A restores the old backup: the confirm must still warn about sync reconciliation
+        a.click("[data-view=data]")
+        a.set_input_files("[data-restore-file]", str(old_backup))
+        confirm = a.inner_text("div.confirm")
+        self.assertIn("Sync is on", confirm)
+        self.assertIn("newer changes from your other devices win", confirm)
+        a.click("[data-restore-yes]")
+        a.wait_for_selector("#toast >> text=Restored")
+        # the restore itself pushes nothing: Drive still holds exactly B's PIN2 state
+        items = self.drive.items()
+        self.assertEqual(items["jobs:1"]["t"], PIN2)
+        self.assertEqual(items["jobs:1"]["v"]["description"], "B's newer posting text")
+        self.assertIsNone(items["jobs:2"]["v"])
+        self.assertNotIn("jobs:3", items)
+
+        # A syncs: restored records reconcile at t=0, so B wins per record and
+        # Zeta stays deleted, while Solo (local-only) is preserved and re-uploaded.
+        self.sync_now(a)
+        items = self.drive.items()
+        self.assertEqual(items["jobs:1"]["v"]["description"], "B's newer posting text")
+        self.assertIsNone(items["jobs:2"]["v"])
+        self.assertIsNotNone(items["jobs:3"]["v"])
+        self.assertEqual(items["jobs:3"]["v"]["company"], "Solo")
+        board = self.board(a)
+        self.assertIn("Acme", board)
+        self.assertNotIn("Zeta", board)
+        self.assertIn("Solo", board)
         self.assertEqual(self.errors, [])
 
     def test_conflicting_edits_resolve_per_record_lww_tie_goes_remote(self):

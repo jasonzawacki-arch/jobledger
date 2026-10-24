@@ -36,10 +36,16 @@ export class Tracker {
     return changed;
   }
   /** Called with the dataset right after a backup restore: the restored records are historical values,
-   * not fresh edits, so their change times stay as they were. The next sync then reconciles per record
-   * (the newer change wins) instead of letting the restored copy silently out-rank the other device. */
+   * not fresh edits, so their change times are cleared (rebased). They then export at t=0, so the next
+   * sync reconciles per record without the restored copy out-ranking the other device: any synced entry
+   * with a real change time wins (newer edits win; deletions stay deleted instead of being resurrected),
+   * a restored record with no synced entry is kept and re-uploaded, and pre-restore tombstones are
+   * dropped (a restore is not a delete). Later genuine edits still diff against the restored snapshot
+   * in saved() and get fresh change times. */
   restored(d: Data): void {
     this.snap = snapshot(d);
+    this.mt = {};
+    void saveMeta(this.mt);
   }
   items(d: Data): Items {
     const it: Items = {};
