@@ -401,6 +401,17 @@ async function moveTo(id: number, stage: number): Promise<void> {
   if (j) { setDetail(j); toast(`Moved to ${STAGES[stage]}.`); }
   await reload();
 }
+/* Issue #19: render() replaces the board DOM, so a focused Move button or menu
+   item is detached and focus would fall to <body>. Restore it explicitly:
+   opening a menu (role="menu") moves focus to its first item — the ARIA menu
+   pattern — and closing it (toggle, selection, or Escape) returns focus to
+   that same card's Move button, which keeps aria-expanded coherent. */
+function focusMoveButton(id: number): void {
+  document.querySelector<HTMLElement>(`[data-move="${id}"]`)?.focus();
+}
+function focusFirstMoveItem(id: number): void {
+  document.querySelector<HTMLElement>(`.movemenu [data-move-to][data-open="${id}"]`)?.focus();
+}
 function formData(f: HTMLFormElement): Record<string, unknown> {
   const o: Record<string, unknown> = {};
   new FormData(f).forEach((v, k) => { o[k] = k === 'stage' ? Number(v) : String(v); });
@@ -414,14 +425,18 @@ document.addEventListener('click', async (ev) => {
   if (d.jump !== undefined) { jumpToColumn(Number(d.jump)); return; }
   if (d.move !== undefined) { // Req. 9: toggle the per-card Move menu (board)
     const id = Number(d.move);
-    S.moveMenu = S.moveMenu === id ? null : id;
-    render(); return;
+    const opening = S.moveMenu !== id;
+    S.moveMenu = opening ? id : null;
+    render();
+    if (opening) focusFirstMoveItem(id); else focusMoveButton(id);
+    return;
   }
   if (d.moveTo !== undefined && d.open !== undefined) { // Req. 9: stage picked from the Move menu
     const id = Number(d.open), stage = Number(d.moveTo);
     S.moveMenu = null;
     const cur = S.jobs.find((j) => j.id === id);
     if (cur && cur.stage !== stage) await moveTo(id, stage); else render();
+    focusMoveButton(id);
     return;
   }
   if (d.gsOn !== undefined) { void gsync()?.link(); return; }
@@ -648,7 +663,7 @@ document.addEventListener('input', (ev) => {
 document.addEventListener('keydown', (ev) => {
   const t = ev.target as HTMLInputElement;
   if (ev.key === 'Escape' && t.matches('[data-search]') && t.value) { t.value = ''; S.query = ''; clearTimeout(searchTimer); void runSearch(); }
-  else if (ev.key === 'Escape' && S.moveMenu !== null) { S.moveMenu = null; render(); }
+  else if (ev.key === 'Escape' && S.moveMenu !== null) { const id = S.moveMenu; S.moveMenu = null; render(); focusMoveButton(id); }
   else if ((ev.key === 'Enter' || ev.key === ' ') && t.matches('[data-jump]')) { ev.preventDefault(); jumpToColumn(Number(t.dataset.jump)); }
 });
 
