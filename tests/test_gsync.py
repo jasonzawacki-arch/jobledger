@@ -143,6 +143,86 @@ class GoogleDriveSync(unittest.TestCase):
         pg.wait_for_selector(".hero h2")
         pg.click("[data-go=board]")
 
+    # --- Issue #22: gated-IndexedDB-open harness for the saveMeta race ---
+    # Patches IDBFactory.prototype.open in the current document. When armed, the
+    # NEXT open returns a fake request whose completion is held until
+    # release_idb_gate(); later opens pass through (or fail, in 'fail' mode).
+    # Tracker.saved()'s saveMeta open is the first open of an edit's save
+    # callback (save()'s data open is queued on its promise chain), so arming
+    # just before an edit's submit deterministically holds that saveMeta.
+    def install_idb_gate(self, pg):
+        pg.evaluate("""() => {
+          if (window.__mtGate) return;
+          const orig = IDBFactory.prototype.open;
+          const gate = window.__mtGate = { orig, mode: 'normal', armed: false, held: null };
+          IDBFactory.prototype.open = function(name, version) {
+            if (gate.armed) {
+              gate.armed = false;
+              const fake = { result: undefined, error: null, onsuccess: null, onerror: null,
+                             onupgradeneeded: null, onblocked: null, readyState: 'pending' };
+              gate.held = { fake, args: [name, version], mode: gate.mode };
+              return fake;
+            }
+            if (gate.mode === 'fail') {
+              const fake = { result: undefined, error: null, onsuccess: null, onerror: null,
+                             onupgradeneeded: null, onblocked: null, readyState: 'pending' };
+              setTimeout(() => { fake.error = new DOMException('forced IndexedDB failure for test', 'AbortError');
+                                 if (fake.onerror) fake.onerror(new Event('error')); }, 0);
+              return fake;
+            }
+            return gate.orig.call(this, name, version);
+          };
+        }""")
+
+    def arm_idb_gate(self, pg, mode="normal"):
+        pg.evaluate(f"() => {{ window.__mtGate.mode = '{mode}'; window.__mtGate.armed = true; }}")
+
+    def release_idb_gate(self, pg):
+        released = pg.evaluate("""() => {
+          const gate = window.__mtGate; if (!gate || !gate.held) return false;
+          const held = gate.held; gate.held = null;
+          if (held.mode === 'fail') {
+            held.fake.error = new DOMException('forced IndexedDB failure for test', 'AbortError');
+            if (held.fake.onerror) held.fake.onerror(new Event('error'));
+            return true;
+          }
+          const real = gate.orig.call(indexedDB, held.args[0], held.args[1]);
+          real.onupgradeneeded = (e) => { held.fake.result = real.result; if (held.fake.onupgradeneeded) held.fake.onupgradeneeded(e); };
+          real.onsuccess = (e) => { held.fake.result = real.result; if (held.fake.onsuccess) held.fake.onsuccess(e); };
+          real.onerror = (e) => { held.fake.error = real.error; if (held.fake.onerror) held.fake.onerror(e); };
+          return true;
+        }""")
+        self.assertTrue(released, "expected a gated IndexedDB open to be held")
+
+    def persisted_mt(self, pg):
+        return pg.evaluate("""() => new Promise((resolve, reject) => {
+          const req = indexedDB.open('jobledger', 1);
+          req.onsuccess = () => { const db = req.result;
+            try { const get = db.transaction('state', 'readonly').objectStore('state').get('mt');
+                  get.onsuccess = () => resolve(get.result || {});
+                  get.onerror = () => reject(String(get.error)); }
+            catch (e) { reject(String(e)); } };
+          req.onerror = () => reject(String(req.error));
+        })""")
+
+    def gated_edit_then_restore(self, pg, backup, mode="normal"):
+        """Arm the gate, edit Acme (its saveMeta is held), restore `backup`
+        (its saveMeta({}) is not held), settle, then release the gate."""
+        pg.click("[data-view=board]")
+        pg.click(".card >> text=Acme"); pg.click("[data-edit]")
+        pg.fill("textarea[name=description]", "gated pre-restore edit")
+        self.arm_idb_gate(pg, mode)
+        pg.click("form[data-form=edit] button[type=submit]")
+        pg.wait_for_selector(".hero h2")  # the edit happened; its saveMeta is held at open()
+        pg.click("[data-go=board]")
+        pg.click("[data-view=data]")
+        pg.set_input_files("[data-restore-file]", str(backup))
+        pg.click("[data-restore-yes]")
+        pg.wait_for_selector("#toast >> text=Restored")
+        pg.wait_for_timeout(600)  # the restore's saveMeta({}) settles (unfixed code)
+        self.release_idb_gate(pg)
+        pg.wait_for_timeout(1000)  # the held write (and any write queued behind it) settles
+
     def test_not_offered_without_client_id_or_in_demo(self):
         pg = self.device(client=False)
         pg.click("[data-view=data]")
@@ -307,6 +387,43 @@ class GoogleDriveSync(unittest.TestCase):
         self.assertIn("Acme", board)
         self.assertNotIn("Zeta", board)
         self.assertIn("Solo", board)
+        self.assertEqual(self.errors, [])
+
+    def test_restore_meta_write_wins_over_delayed_prerestore_write(self):
+        # Issue #22: a pre-restore saveMeta (high PIN3 timestamps) whose IndexedDB
+        # open is delayed until after the restore's saveMeta({}) must not win:
+        # persisted mt must end as {} (the PR #21 t=0 rebase), live and after reload.
+        PIN1, PIN3 = 2000000000000, 2000000120000
+        a = self.device(pin=PIN1)
+        self.add(a, "Acme"); self.add(a, "Zeta")
+        self.turn_on(a)
+        a.click("[data-view=data]")
+        with a.expect_download() as dl:
+            a.click("[data-backup]")
+        backup = Path(dl.value.path())
+        a.evaluate(f"window.__pin={PIN3}")
+        self.install_idb_gate(a)
+        self.gated_edit_then_restore(a, backup)
+        self.assertEqual(self.persisted_mt(a), {})
+        a.reload(); a.wait_for_selector(".board")  # Tracker.start() reloads mt from the persisted store
+        self.assertEqual(self.persisted_mt(a), {})
+        self.assertEqual(self.errors, [])
+
+    def test_restore_meta_write_wins_over_delayed_prerestore_write_localstorage_fallback(self):
+        # Issue #22, localStorage leg: with IndexedDB failing, saveMeta falls back
+        # to localStorage. The same gated saved-then-restored sequence must still
+        # end with localStorage 'jobledger.data.mt' == '{}'.
+        PIN1, PIN3 = 2000000000000, 2000000120000
+        a = self.device(pin=PIN1)
+        self.add(a, "Acme")
+        a.click("[data-view=data]")
+        with a.expect_download() as dl:
+            a.click("[data-backup]")
+        backup = Path(dl.value.path())
+        a.evaluate(f"window.__pin={PIN3}")
+        self.install_idb_gate(a)
+        self.gated_edit_then_restore(a, backup, mode="fail")
+        self.assertEqual(a.evaluate("localStorage.getItem('jobledger.data.mt')"), "{}")
         self.assertEqual(self.errors, [])
 
     def test_conflicting_edits_resolve_per_record_lww_tie_goes_remote(self):
