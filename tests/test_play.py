@@ -42,6 +42,25 @@ def job_count(pg):
     return pg.evaluate("fetch('/api/jobs?closed=1').then(r => r.json()).then(j => j.length)")
 
 
+def import_csv(pg, csv_text):
+    """POST a CSV to /api/import through the in-page engine; returns {status, body}."""
+    return pg.evaluate("""csv => fetch('/api/import', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({csv})})
+      .then(r => r.json().then(j => ({status: r.status, body: j})))""", csv_text)
+
+
+def backup_counts(pg):
+    """Job/event counts and company names from the app's own backup (the persisted dataset)."""
+    return pg.evaluate("""fetch('/api/backup').then(r => r.text()).then(t => {
+      const b = JSON.parse(t);
+      return {jobs: b.jobs.length, events: b.events.length,
+              companies: b.jobs.map(j => j.company)}; })""")
+
+
+def csv_of(n, prefix="Imp"):
+    return "company,title\n" + "".join(f"{prefix} Co {i},Role {i}\n" for i in range(n))
+
+
 @unittest.skipUnless(sync_playwright and (PLAY / "index.html").exists(), "needs playwright and `npm run build`")
 class Play(unittest.TestCase):
     @classmethod
@@ -122,6 +141,75 @@ class Play(unittest.TestCase):
         add_jobs(pg, 3)
         pg.reload(); pg.wait_for_selector(".board")
         self.assertIn("free tier: 3/20", pg.evaluate("document.querySelector('.toolbar').innerText").lower())
+
+    def test_csv_import_over_cap_is_atomic_19_plus_3(self):
+        # Issue #24: 19 tracked + a 3-row import must reject BEFORE mutating anything.
+        pg = self.open()
+        self.assertTrue(all(r["status"] == 201 for r in add_jobs(pg, 19)))
+        before = backup_counts(pg)
+        self.assertEqual((before["jobs"], before["events"]), (19, 19))
+        res = import_csv(pg, csv_of(3))
+        self.assertEqual(res["status"], 400, res)
+        self.assertIn("free tier", res["body"]["error"].lower())
+        after = backup_counts(pg)
+        self.assertEqual((after["jobs"], after["events"]), (19, 19),
+                         "a rejected import must leave jobs and events untouched")
+        self.assertFalse(any(c.startswith("Imp") for c in after["companies"]))
+        # Nothing hidden in memory either: a reload and a later successful add
+        # (the 20th slot) must not persist any of the rejected rows.
+        pg.reload(); pg.wait_for_selector(".board")
+        self.assertEqual(job_count(pg), 19)
+        self.assertTrue(all(r["status"] == 201 for r in add_jobs(pg, 1, start=100)))
+        after2 = backup_counts(pg)
+        self.assertEqual(after2["jobs"], 20)
+        self.assertFalse(any(c.startswith("Imp") for c in after2["companies"]))
+        self.assertFalse(self.errors, self.errors)
+
+    def test_csv_import_over_cap_is_atomic_from_zero_21(self):
+        pg = self.open()
+        res = import_csv(pg, csv_of(21))
+        self.assertEqual(res["status"], 400, res)
+        self.assertIn("free tier", res["body"]["error"].lower())
+        counts = backup_counts(pg)
+        self.assertEqual((counts["jobs"], counts["events"]), (0, 0))
+        pg.reload(); pg.wait_for_selector(".board")
+        self.assertEqual(job_count(pg), 0)
+        self.assertFalse(self.errors, self.errors)
+
+    def test_csv_import_exactly_remaining_capacity_succeeds(self):
+        pg = self.open()
+        self.assertTrue(all(r["status"] == 201 for r in add_jobs(pg, 19)))
+        res = import_csv(pg, csv_of(1))
+        self.assertEqual(res["status"], 201, res)
+        self.assertEqual(res["body"]["imported"], 1)
+        self.assertEqual(job_count(pg), 20)
+        self.assertFalse(self.errors, self.errors)
+
+    def test_csv_import_malformed_csv_changes_nothing(self):
+        pg = self.open()
+        self.assertTrue(all(r["status"] == 201 for r in add_jobs(pg, 2)))
+        bad = "company,title,status\nGood Co,Role,active\nBad Co,Role,bogus\n"
+        res = import_csv(pg, bad)
+        self.assertEqual(res["status"], 400, res)
+        counts = backup_counts(pg)
+        self.assertEqual((counts["jobs"], counts["events"]), (2, 2))
+        self.assertFalse(any(c == "Good Co" for c in counts["companies"]))
+        self.assertFalse(self.errors, self.errors)
+
+    def test_csv_import_unrestricted_in_phone_build(self):
+        # The phone PWA shares the engine but is never gated: a 21-row import succeeds whole.
+        site = Static(PHONE)
+        try:
+            pg = self.ctx.new_page()
+            pg.on("pageerror", lambda e: self.errors.append(str(e)))
+            pg.goto(site.base); pg.wait_for_selector(".board")
+            res = import_csv(pg, csv_of(21))
+            self.assertEqual(res["status"], 201, res)
+            self.assertEqual(res["body"]["imported"], 21)
+            self.assertEqual(job_count(pg), 21)
+            self.assertFalse(self.errors, self.errors)
+        finally:
+            site.stop()
 
     def test_gate_is_play_only(self):
         # the phone PWA build shares the engine but is never gated
