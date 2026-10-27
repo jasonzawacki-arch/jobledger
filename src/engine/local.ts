@@ -4,7 +4,7 @@
 // backup moves freely between the phone and the server.
 import { match as runMatch } from './matcher';
 import { DEFAULT_MODEL, SYSTEM, diffParts, guard } from './rewrite';
-import { gateMessage, isPro } from '../pro';
+import { gateMessage, importGateMessage, isPro } from '../pro';
 
 export interface JobRow {
   id: number; company: string; title: string; location: string; pay: string; url: string; posted_on: string; description: string; source: string;
@@ -514,10 +514,25 @@ export class Engine {
       }
     }
     if (!rows.length) throw new Bad('No jobs found in the file');
-    for (const { vals, follow, stage, status } of rows) {
-      const j = this.addJob({ ...vals, stage: Math.min(stage, 1), follow_up_on: follow });
-      if (stage > 1) this.move(j.id, stage);
-      if (status !== 'active') this.close(j.id, status);
+    // Issue #24: capacity preflight BEFORE any mutation. Without it, addJob's free-tier gate
+    // threw part-way through the loop below on the Play build, leaving the rows added so far
+    // in memory — a later successful save then persisted a partial import the user was told
+    // had failed. The import is atomic: it fits whole, or nothing is imported.
+    const mode = typeof window !== 'undefined' ? ((window as unknown as { __JL_MODE__?: string }).__JL_MODE__ || '') : '';
+    const deniedImport = importGateMessage(mode, isPro(), this.d.jobs.length, rows.length);
+    if (deniedImport) throw new Bad(deniedImport);
+    // Belt and braces: snapshot the dataset and roll back on ANY failure in the mutation
+    // loop, so no error path can ever leave a partial import behind.
+    const before = JSON.parse(JSON.stringify(this.d)) as Data;
+    try {
+      for (const { vals, follow, stage, status } of rows) {
+        const j = this.addJob({ ...vals, stage: Math.min(stage, 1), follow_up_on: follow });
+        if (stage > 1) this.move(j.id, stage);
+        if (status !== 'active') this.close(j.id, status);
+      }
+    } catch (e) {
+      this.d = before;
+      throw e;
     }
     return { imported: rows.length };
   }
