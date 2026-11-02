@@ -1,5 +1,6 @@
 import { api, ApiError, getAiKey, getToken, setAiKey, setToken } from './api';
 import { FREE_JOB_CAP, isPro } from './pro';
+import { checkForUpdate, Release, snooze } from './update';
 import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, SOURCES, STAGES } from './types';
 import { calLink, esc, userTimeZone, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
 
@@ -699,6 +700,20 @@ window.addEventListener('jobledger:save-failed', () => toast('This browser would
 if (MODE !== 'demo' && MODE !== 'play' && 'serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* optional */ });
 }
+/* update prompt: a slim banner above the header, outside #view so re-renders leave it alone.
+ * Play builds defer to Play's updater (installer detection lands with Capacitor; see update.ts). */
+function showUpdate(r: Release): void {
+  const el = document.createElement('div');
+  el.className = 'banner update';
+  el.setAttribute('role', 'status');
+  el.innerHTML = `<span><strong>${esc(r.version)}</strong> · Update available</span><span class="btns">`
+    + `<a class="btn" data-update-notes href="${esc(safeUrl(r.notes))}" target="_blank" rel="noopener noreferrer" aria-label="Release notes for ${esc(r.version)}">Info</a>`
+    + `<a class="btn pri" data-update-get href="${esc(safeUrl(r.download))}" target="_blank" rel="noopener noreferrer">Update</a>`
+    + `<button class="btn x" type="button" data-update-dismiss aria-label="Dismiss update ${esc(r.version)}">×</button></span>`;
+  el.querySelector('[data-update-dismiss]')!.addEventListener('click', () => { snooze(r.version); el.remove(); });
+  document.querySelector('.wrap')?.prepend(el);
+}
+if (BUILD !== 'demo' && BUILD !== 'play') void checkForUpdate().then((r) => { if (r) showUpdate(r); });
 (async () => {
   try { applyTheme(localStorage.getItem('jobledger.theme') || 'system'); } catch { /* ignore */ }
   render();

@@ -218,6 +218,10 @@ textarea { resize: vertical; min-height: 84px; }
 .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .err { color: var(--bad); font-size: 13.5px; margin: 0; }
 .banner { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; background: var(--bad-soft); color: var(--bad); border-radius: 12px; padding: 9px 13px; font-weight: 500; }
+.banner.update { background: var(--accent-soft); color: var(--ink); margin-top: 12px; }
+.banner.update a.btn { text-decoration: none; color: inherit; }
+.banner.update a.btn.pri { color: var(--accent-ink); }
+.banner.update .btn.x { padding-inline: 10px; line-height: 1; }
 .closed-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 10px; }
 .sect { margin-top: 18px; }
 .sect > .btn { margin-bottom: 4px; }

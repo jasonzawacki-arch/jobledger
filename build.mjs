@@ -40,10 +40,12 @@ function bundle(entryFile) {
   const body = order.map((m) => `${m.id}:[function(exports,require){${m.code}\n},${JSON.stringify(m.deps)}]`).join(',\n');
   return `(function(){var D={${body}};var C={};function load(i){if(C[i])return C[i].exports;var m=C[i]={exports:{}};var d=D[i];d[0](m.exports,function(s){return load(d[1][s]);});return m.exports;}load(${mods.get(entry).id});})();`;
 }
+// The app's version (package.json) reaches the bundle as a constant, for the update check (src/update.ts).
+const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 function page(entryFile) {
   const html = fs.readFileSync(path.join(root, 'src/index.template.html'), 'utf8');
   return html.replace('/*CSS*/', () => fs.readFileSync(path.join(root, 'src/style.css'), 'utf8'))
-    .replace('/*JS*/', () => bundle(entryFile).replace(/<\/script/gi, '<\\/script'));
+    .replace('/*JS*/', () => bundle(entryFile).replace(/\b__APP_VERSION__\b/g, JSON.stringify(version)).replace(/<\/script/gi, '<\\/script'));
 }
 function installable(dir, html, swFile) {
   fs.mkdirSync(dir, { recursive: true });
