@@ -218,6 +218,10 @@ textarea { resize: vertical; min-height: 84px; }
 .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .err { color: var(--bad); font-size: 13.5px; margin: 0; }
 .banner { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; background: var(--bad-soft); color: var(--bad); border-radius: 12px; padding: 9px 13px; font-weight: 500; }
+/* Issue #26: the update prompt reuses .banner's layout, in the accent palette (an offer, not an alarm). */
+.update-banner { background: var(--accent-soft); color: var(--ink); margin: 0 0 10px; justify-content: flex-start; }
+.update-banner .update-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+.update-banner .update-dismiss { background: none; border: 0; color: inherit; font: inherit; font-size: 17px; line-height: 1; padding: 4px 6px; cursor: pointer; border-radius: 8px; }
 .closed-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 10px; }
 .sect { margin-top: 18px; }
 .sect > .btn { margin-bottom: 4px; }

@@ -12,6 +12,12 @@ let ts;
 try { ts = require('typescript'); } catch { ts = require(process.env.TS_PATH || '/home/claude/.npm-global/lib/node_modules/typescript'); }
 
 const root = path.dirname(new URL(import.meta.url).pathname);
+// Issue #26: surface the app version (source of truth: `version` in package.json) to the
+// bundle at build time as the boot constant window.__JL_VERSION__, the same pattern as the
+// window.__JL_MODE__ / window.__JL_REMOTE__ constants the *-setup.ts modules set. src/update.ts
+// reads it for the GitHub Releases update check. Prefixed onto the bundle inside the page's
+// single <script>, so every build (server/phone/demo/play) carries it.
+const APP_VERSION = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 function bundle(entryFile) {
   const entry = path.join(root, entryFile);
   const mods = new Map();
@@ -43,7 +49,7 @@ function bundle(entryFile) {
 function page(entryFile) {
   const html = fs.readFileSync(path.join(root, 'src/index.template.html'), 'utf8');
   return html.replace('/*CSS*/', () => fs.readFileSync(path.join(root, 'src/style.css'), 'utf8'))
-    .replace('/*JS*/', () => bundle(entryFile).replace(/<\/script/gi, '<\\/script'));
+    .replace('/*JS*/', () => (`window.__JL_VERSION__=${JSON.stringify(APP_VERSION)};\n` + bundle(entryFile)).replace(/<\/script/gi, '<\\/script'));
 }
 function installable(dir, html, swFile) {
   fs.mkdirSync(dir, { recursive: true });
