@@ -1,6 +1,7 @@
 import { api, ApiError, getAiKey, getToken, setAiKey, setToken } from './api';
 import { FREE_JOB_CAP, isPro } from './pro';
 import { CLOSED_LABEL, Job, Match, Pulse, Rewrite, SOURCES, STAGES } from './types';
+import { checkForUpdate, snoozeVersion, ReleaseInfo } from './update';
 import { calLink, esc, userTimeZone, isoDay, plural, safeUrl, shortDate, tile, whenLocal } from './util';
 
 /** Which build this is: served by the Python server, the installable phone app, the demo, or the Play build. */
@@ -25,6 +26,35 @@ const S: State = {
   confirmDelete: false, pendingRestore: null, needToken: false, error: '', loaded: false, moveMenu: null, rewrites: {}, draft: false,
   query: '', hits: null, whereError: false,
 };
+/* ---------- Issue #26: in-app update prompt (GitHub Releases feed; see src/update.ts) ---------- */
+// Play-installed builds defer to Play's own updater once installer detection lands with
+// Capacitor (Req. 2); until then the check+banner ship in this shared app shell for all builds.
+// The banner is a standalone slim element above the view, so render() cycles never disturb it
+// and it never blocks the UI (no modal).
+let pendingUpdate: ReleaseInfo | null = null;
+function renderUpdateBanner(): void {
+  let el = document.getElementById('update-banner');
+  if (!pendingUpdate) { el?.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'update-banner';
+    const wrap = document.querySelector('.wrap');
+    const main = document.getElementById('view');
+    if (wrap && main) wrap.insertBefore(el, main); else document.body.prepend(el);
+  }
+  const u = pendingUpdate;
+  el.className = 'banner update-banner';
+  el.setAttribute('role', 'status');
+  el.innerHTML = `<span>Update available — JobLedger ${esc(u.version)} is ready.</span><span class="update-actions">`
+    + `<a class="btn" href="${esc(safeUrl(u.htmlUrl))}" target="_blank" rel="noopener noreferrer" data-update-info>Release notes</a>`
+    + `<a class="btn pri" href="${esc(safeUrl(u.downloadUrl))}" target="_blank" rel="noopener noreferrer" data-update-go>Update</a>`
+    + `<button class="update-dismiss" type="button" data-update-dismiss aria-label="Dismiss update ${esc(u.version)}">\u00d7</button></span>`;
+}
+async function checkUpdateAtBoot(): Promise<void> {
+  try { pendingUpdate = await checkForUpdate(); } catch { pendingUpdate = null; } // fail silent, by design
+  renderUpdateBanner();
+}
+
 const viewEl = document.getElementById('view') as HTMLElement;
 const stripEl = document.getElementById('strip') as HTMLElement;
 const tabsEl = document.getElementById('tabs') as HTMLElement;
@@ -419,9 +449,13 @@ function formData(f: HTMLFormElement): Record<string, unknown> {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-paste-posting],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to],[data-jump]');
+  const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-view],[data-open],[data-go],[data-add],[data-cancel-form],[data-toggle-closed],[data-stage],[data-close],[data-reopen],[data-edit],[data-delete],[data-delete-yes],[data-delete-no],[data-fu-clear],[data-export-csv],[data-backup],[data-restore-yes],[data-restore-no],[data-signout],[data-contacted],[data-del-contact],[data-del-prep],[data-prep-defaults],[data-draft],[data-draft-close],[data-copy-draft],[data-suggest],[data-copy-suggestion],[data-key-remove],[data-search-clear],[data-ics],[data-ics-all],[data-fill-link],[data-paste-posting],[data-del-interview],[data-use-phone],[data-gs-on],[data-gs-now],[data-gs-off],[data-gs-ch],[data-move],[data-move-to],[data-jump],[data-update-dismiss]');
   if (!t) return;
   const d = t.dataset;
+  if (d.updateDismiss !== undefined) { // Issue #26: snooze this version; a newer one re-prompts
+    if (pendingUpdate) snoozeVersion(pendingUpdate.version);
+    pendingUpdate = null; renderUpdateBanner(); return;
+  }
   if (d.jump !== undefined) { jumpToColumn(Number(d.jump)); return; }
   if (d.move !== undefined) { // Req. 9: toggle the per-card Move menu (board)
     const id = Number(d.move);
@@ -702,6 +736,7 @@ if (MODE !== 'demo' && MODE !== 'play' && 'serviceWorker' in navigator && (locat
 (async () => {
   try { applyTheme(localStorage.getItem('jobledger.theme') || 'system'); } catch { /* ignore */ }
   render();
+  void checkUpdateAtBoot(); // Issue #26: at most daily, fail-silent; never blocks first paint
   await guard(refresh);
   render();
 })();
