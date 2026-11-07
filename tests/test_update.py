@@ -1,6 +1,8 @@
 """Browser tests for the in-app update prompt (Issue #26): the app checks the public
 GitHub Releases feed at most once a day on launch and shows a slim, dismissible banner
-when a newer applicable release exists. The feed is mocked with Playwright route
+when a newer applicable release exists. Issue #29 adds banner persistence: a discovered,
+undismissed release keeps prompting on same-day relaunches from a revalidated local
+cache, with no second feed request. The feed is mocked with Playwright route
 interception on the api.github.com releases URL — the repo currently has zero releases,
 so an empty or unreachable feed must stay silent (the designed behavior today).
 Skipped when Playwright or the built files are missing."""
@@ -141,6 +143,58 @@ class UpdatePrompt(unittest.TestCase):
         pg.wait_for_selector(".update-banner", timeout=5000)
         self.assertIn("0.3.0", pg.inner_text(".update-banner"))
         self.assertFalse(self.errors, self.errors)
+
+    def test_banner_persists_on_same_day_relaunch_without_dismissal(self):
+        # Issue #29: a discovered, undismissed release must still prompt on a
+        # same-day relaunch, served from the local cache — the 24h throttle
+        # must not make the banner vanish, and must not be bypassed either.
+        self.feed = [release("v0.2.0")]
+        pg = self.open()
+        pg.wait_for_selector(".update-banner", timeout=5000)
+        hits_after_first = self.feed_hits
+        self.assertGreaterEqual(hits_after_first, 1)
+        pg.reload(); pg.wait_for_selector(".board")
+        pg.wait_for_selector(".update-banner", timeout=5000)
+        self.assertIn("0.2.0", pg.inner_text(".update-banner"))
+        go = pg.get_attribute("[data-update-go]", "href")
+        self.assertEqual(go, "https://github.com/jasonzawacki-arch/jobledger/releases/download/v0.2.0/jobledger.apk")
+        self.assertEqual(self.feed_hits, hits_after_first,
+                         "the persistent banner must come from cache, not a second feed request")
+        # Advance past the daily gate with a later version in the feed: the
+        # cached prompt is superseded by the newer release.
+        self.feed = [release("v0.3.0"), release("v0.2.0")]
+        pg.evaluate("localStorage.removeItem('jobledger.update.lastCheck')")
+        pg.reload(); pg.wait_for_selector(".board")
+        pg.wait_for_selector(".update-banner", timeout=5000)
+        self.assertIn("0.3.0", pg.inner_text(".update-banner"))
+        self.assertGreater(self.feed_hits, hits_after_first)
+        self.assertFalse(self.errors, self.errors)
+
+    def test_dismissed_banner_stays_gone_on_same_day_relaunch(self):
+        # Issue #29 counterpart: persistence must not resurrect a dismissal.
+        self.feed = [release("v0.2.0")]
+        pg = self.open()
+        pg.wait_for_selector(".update-banner", timeout=5000)
+        hits_after_first = self.feed_hits
+        pg.click("[data-update-dismiss]")
+        pg.wait_for_selector(".update-banner", state="detached", timeout=5000)
+        pg.reload(); pg.wait_for_selector(".board")
+        self.assert_silent(pg)
+        self.assertEqual(self.feed_hits, hits_after_first,
+                         "a dismissed same-day relaunch must not re-fetch either")
+
+    def test_tampered_cached_release_is_ignored(self):
+        # Issue #29: the cache is revalidated, never trusted blindly — an
+        # entry with non-http(s) URLs must not produce a banner at all.
+        self.feed = []
+        pg = self.open()
+        self.assert_silent(pg)
+        pg.evaluate("""localStorage.setItem('jobledger.update.cached', JSON.stringify({
+          version: '9.9.9', tag: 'v9.9.9',
+          htmlUrl: 'javascript:alert(1)', downloadUrl: 'javascript:alert(2)',
+          notes: '', prerelease: false }))""")
+        pg.reload(); pg.wait_for_selector(".board")
+        self.assert_silent(pg)
 
     def test_check_runs_at_most_once_a_day(self):
         self.feed = [release("v0.2.0")]
